@@ -1,9 +1,17 @@
 """
-FastAPI application for RAG backend with ChromaDB.
+FastAPI application for RAG backend with ChromaDB and Vertex AI.
 """
+import os
 from fastapi import FastAPI, HTTPException
 
-from .models import CodeIngestRequest, QueryRequest
+from .models import (
+    CodeIngestRequest,
+    QueryRequest,
+    InferenceRequest,
+    InferenceResponse,
+    HealthResponse,
+    TokenUsage
+)
 from .database import (
     get_collection,
     get_client,
@@ -14,7 +22,11 @@ from .chunker import chunk_python_code
 from .search import perform_vector_search, perform_hybrid_search
 
 
-app = FastAPI(title="RAG Backend with ChromaDB")
+app = FastAPI(
+    title="RAG Backend",
+    description="Intelligent code chunking and retrieval with hybrid search",
+    version="1.0.0"
+)
 
 
 @app.post("/ingest")
@@ -108,21 +120,27 @@ async def query_hybrid(request: QueryRequest):
         raise HTTPException(status_code=500, detail=f"hybrid search failed: {str(e)}")
 
 
-@app.get("/health")
-async def health_check():
-    """check chromadb connection health"""
+@app.get("/health", response_model=HealthResponse)
+async def health_check() -> HealthResponse:
+    """Check service health including ChromaDB and GCP configuration"""
     try:
-        # test chromadb connection
         client = get_client()
         heartbeat = client.heartbeat()
         
-        return {
-            "status": "healthy",
-            "chroma_heartbeat": heartbeat,
-            "collection_name": get_collection_name()
-        }
+        # Check if GCP is configured
+        gcp_configured = bool(
+            os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and 
+            os.getenv("GOOGLE_CLOUD_PROJECT")
+        )
+        
+        return HealthResponse(
+            status="healthy",
+            chroma_heartbeat=heartbeat,
+            collection_name=get_collection_name(),
+            gcp_configured=gcp_configured
+        )
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"chroma db unavailable: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"service unavailable: {str(e)}")
 
 
 @app.delete("/collection")
@@ -136,6 +154,74 @@ async def delete_collection():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"collection reset failed: {str(e)}")
+
+
+@app.post("/inference", response_model=InferenceResponse)
+async def generate_inference(request: InferenceRequest) -> InferenceResponse:
+    """
+    Generate AI inference using Vertex AI.
+    Requires GCP credentials to be configured.
+    """
+    try:
+        # Check if GCP is configured
+        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        
+        if not credentials_path or not project_id:
+            raise HTTPException(
+                status_code=503,
+                detail="GCP not configured. Set GOOGLE_APPLICATION_CREDENTIALS and GOOGLE_CLOUD_PROJECT"
+            )
+        
+        # Import Vertex AI client
+        try:
+            from google import genai
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="google-genai not installed"
+            )
+        
+        # Initialize and call Vertex AI
+        client = genai.Client(
+            vertexai=True,
+            project=project_id,
+            location=location
+        )
+        
+        response = client.models.generate_content(
+            model=request.model,
+            contents=request.prompt
+        )
+        
+        # Get response text
+        response_text = getattr(response, 'text', '') or ''
+        
+        # Extract token usage
+        usage = None
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            metadata = response.usage_metadata
+            usage = TokenUsage(
+                input_tokens=getattr(metadata, 'prompt_token_count', 0),
+                output_tokens=getattr(metadata, 'candidates_token_count', 0),
+                total_tokens=getattr(metadata, 'total_token_count', 0)
+            )
+        
+        return InferenceResponse(
+            status="success",
+            model=request.model,
+            response=response_text,
+            usage=usage
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"inference failed: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
