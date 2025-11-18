@@ -1,5 +1,113 @@
 # Changelog
 
+## v1.2.0 - Absolute Scoring Thresholds ⚖️
+
+### 🎯 New Feature: Quality-Based Result Filtering
+
+**Absolute Scoring Thresholds**
+- ✅ Vector similarity threshold filtering (0.0-1.0 range)
+- ✅ BM25 score threshold filtering (0.0+ range)
+- ✅ Pre-RRF filtering to prevent irrelevant results
+- ✅ Prevents "best of the worst" ranking problem
+- ✅ Optional per-query configuration
+
+**How It Works**
+1. Documents are scored by both vector and BM25 methods
+2. Documents below absolute thresholds are filtered out **before** RRF fusion
+3. Only high-quality documents participate in final ranking
+4. Empty results signal no relevant documents found (better than misleading results)
+
+**API Changes**
+- Enhanced `/query` endpoint with `vector_similarity_threshold` parameter
+- Enhanced `/query-hybrid` endpoint with both vector and BM25 thresholds
+- Enhanced `/query-db` (RAG) endpoint with threshold support
+- All threshold parameters are optional (backwards compatible)
+
+**New Request Fields**
+```json
+{
+  "query": "authentication system",
+  "n_results": 10,
+  "vector_similarity_threshold": 0.5,  // Optional: 0.0-1.0
+  "bm25_score_threshold": 5.0          // Optional: 0.0+
+}
+```
+
+**New Response Fields**
+Hybrid search results now include raw scores for debugging:
+- `similarity`: Raw vector similarity score (0.0-1.0)
+- `bm25_score`: Raw BM25 relevance score
+- `distance`: Vector distance (1 - similarity)
+
+**Enhanced Search Functions**
+- `perform_vector_search()`: Added similarity threshold filtering
+- `perform_hybrid_search()`: Added dual threshold filtering with logging
+- `distance_to_similarity()`: New helper for distance-to-similarity conversion
+
+**Documentation**
+- 📄 New: `THRESHOLD_FILTERING.md` - Comprehensive threshold guide
+- 📄 Updated: `SEARCH_COMPARISON_GUIDE.md` - Threshold testing instructions
+- 📄 Updated: `compare_search_endpoints.py` - Threshold support added
+
+**Logging Improvements**
+- Threshold filtering statistics logged at INFO level
+- Shows how many results passed each threshold
+- Warns when no results pass thresholds
+
+**Configuration Guidelines**
+- Vector: 0.5-0.7 recommended for moderate filtering
+- BM25: 3.0-10.0 recommended for moderate filtering
+- Start conservative, adjust based on results
+- Different thresholds for different query types
+
+**Use Cases**
+- ✅ Large, diverse codebases (prevent irrelevant results)
+- ✅ High-precision requirements (only relevant results)
+- ✅ RAG pipelines (better context quality)
+- ✅ Production systems (consistent quality)
+
+**Benefits**
+- Higher precision (more relevant results)
+- Clear signal when no relevant results exist
+- Better RAG answer quality
+- Reduced noise in search results
+
+### 🔧 Technical Details
+
+**Threshold Filtering Architecture**
+```
+Query → Vector Search → Threshold Filter ─┐
+                                           ├─→ RRF Fusion → Results
+Query → BM25 Search → Threshold Filter ───┘
+```
+
+**Score Conversion**
+- Cosine distance → similarity: `1 - distance`
+- L2 distance → similarity: `1 / (1 + distance)`
+- Inner product: Already a similarity score
+
+**Backwards Compatibility**
+- ✅ All threshold parameters are optional
+- ✅ Default behavior unchanged (no filtering)
+- ✅ Existing API calls continue to work
+
+### 📊 Testing & Comparison
+
+**Updated Comparison Script**
+- Configurable thresholds at script level
+- Shows raw scores in output (when available)
+- Threshold status displayed in summary
+- Easy A/B testing (with vs. without thresholds)
+
+**Example Threshold Configuration**
+```python
+# In compare_search_endpoints.py
+VECTOR_SIMILARITY_THRESHOLD = 0.5
+BM25_SCORE_THRESHOLD = 5.0
+```
+
+---
+
 ## v1.1.0 - Complete RAG Pipeline
 
 ### 🎉 New Feature: End-to-End RAG Platform

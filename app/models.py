@@ -16,6 +16,17 @@ class QueryRequest(BaseModel):
     """Request model for querying the vector db"""
     query: str = Field(..., description="Search query text")
     n_results: int = Field(default=5, ge=1, le=50, description="Number of results to return")
+    vector_similarity_threshold: Optional[float] = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        description="Minimum vector similarity score (0-1). Results below this are filtered out."
+    )
+    bm25_score_threshold: Optional[float] = Field(
+        default=1.0,
+        ge=0.0,
+        description="Minimum BM25 score. Results below this are filtered out. (Hybrid search only)"
+    )
 
 
 class InferenceRequest(BaseModel):
@@ -72,6 +83,17 @@ class RAGQueryRequest(BaseModel):
     query: str = Field(..., description="User question to answer using RAG", min_length=1)
     n_results: int = Field(default=10, ge=1, le=50, description="Number of chunks to retrieve for ranking")
     confidence_threshold: float = Field(default=0.010, ge=0.0, le=1.0, description="Minimum combined confidence score")
+    vector_similarity_threshold: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Minimum vector similarity score (0-1) before RRF fusion"
+    )
+    bm25_score_threshold: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description="Minimum BM25 score before RRF fusion"
+    )
     model: str = Field(default="gemini-2.0-flash-exp", description="Model to use for inference")
 
 

@@ -111,12 +111,17 @@ async def query_code(request: QueryRequest):
     """
     try:
         logger.info(
-            "Vector query received: '%s' (top %d)",
+            "Vector query received: '%s' (top %d, similarity_threshold=%s)",
             request.query,
-            request.n_results
+            request.n_results,
+            request.vector_similarity_threshold
         )
-        # perform vector similarity search
-        vector_results = perform_vector_search(request.query, request.n_results)
+        # perform vector similarity search with optional threshold
+        vector_results = perform_vector_search(
+            request.query,
+            request.n_results,
+            similarity_threshold=request.vector_similarity_threshold
+        )
         
         # format results
         formatted_results = []
@@ -153,11 +158,18 @@ async def query_hybrid(request: QueryRequest):
     """
     try:
         logger.info(
-            "Hybrid query received: '%s' (top %d)",
+            "Hybrid query received: '%s' (top %d, vector_threshold=%s, bm25_threshold=%s)",
             request.query,
-            request.n_results
+            request.n_results,
+            request.vector_similarity_threshold,
+            request.bm25_score_threshold
         )
-        sorted_results = perform_hybrid_search(request.query, request.n_results)
+        sorted_results = perform_hybrid_search(
+            request.query,
+            request.n_results,
+            vector_similarity_threshold=request.vector_similarity_threshold,
+            bm25_score_threshold=request.bm25_score_threshold
+        )
         
         response = {
             "status": "success",
@@ -188,10 +200,12 @@ async def query_db(request: RAGQueryRequest) -> RAGQueryResponse:
     """
     try:
         logger.info(
-            "RAG query received: '%s' (top %d, threshold %.2f, model %s)",
+            "RAG query received: '%s' (top %d, threshold %.2f, vector_threshold=%s, bm25_threshold=%s, model %s)",
             request.query,
             request.n_results,
             request.confidence_threshold,
+            request.vector_similarity_threshold,
+            request.bm25_score_threshold,
             request.model
         )
         # Check if GCP is configured
@@ -210,8 +224,13 @@ async def query_db(request: RAGQueryRequest) -> RAGQueryResponse:
                 detail="GCP not configured. Set GOOGLE_APPLICATION_CREDENTIALS and GOOGLE_CLOUD_PROJECT"
             )
         
-        # Step 1: Perform hybrid search to retrieve relevant chunks
-        hybrid_results = perform_hybrid_search(request.query, request.n_results)
+        # Step 1: Perform hybrid search to retrieve relevant chunks with optional thresholds
+        hybrid_results = perform_hybrid_search(
+            request.query,
+            request.n_results,
+            vector_similarity_threshold=request.vector_similarity_threshold,
+            bm25_score_threshold=request.bm25_score_threshold
+        )
         logger.info(
             "Hybrid retrieval returned %d chunk(s) for RAG query",
             len(hybrid_results)
