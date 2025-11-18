@@ -14,6 +14,15 @@ from collections import Counter
 API_BASE_URL = "http://localhost:8001"
 N_RESULTS = 10  # Number of results to retrieve per query
 
+# Threshold settings
+# Set to None to disable, or use values like 0.5, 0.7, etc.
+VECTOR_SIMILARITY_THRESHOLD = None  # Range: 0.0 to 1.0 (higher = more strict)
+BM25_SCORE_THRESHOLD = None  # Range: 0.0+ (higher = more strict, typical good scores are 5-20)
+
+# For testing with thresholds, uncomment these:
+# VECTOR_SIMILARITY_THRESHOLD = 0.5  # Only keep results with >50% similarity
+# BM25_SCORE_THRESHOLD = 2.0  # Only keep results with BM25 score > 2.0
+
 
 # Test queries - customize these based on your codebase
 TEST_QUERIES = [
@@ -28,12 +37,21 @@ TEST_QUERIES = [
 ]
 
 
-def call_vector_search(query: str, n_results: int = N_RESULTS) -> Dict[str, Any]:
+def call_vector_search(
+    query: str,
+    n_results: int = N_RESULTS,
+    vector_similarity_threshold: Optional[float] = None
+) -> Dict[str, Any]:
     """Call the /query endpoint (vector search only)"""
     start_time = time.time()
+    
+    payload = {"query": query, "n_results": n_results}
+    if vector_similarity_threshold is not None:
+        payload["vector_similarity_threshold"] = vector_similarity_threshold
+    
     response = requests.post(
         f"{API_BASE_URL}/query",
-        json={"query": query, "n_results": n_results},
+        json=payload,
         timeout=30
     )
     response_time = time.time() - start_time
@@ -44,12 +62,24 @@ def call_vector_search(query: str, n_results: int = N_RESULTS) -> Dict[str, Any]
     return result
 
 
-def call_hybrid_search(query: str, n_results: int = N_RESULTS) -> Dict[str, Any]:
+def call_hybrid_search(
+    query: str,
+    n_results: int = N_RESULTS,
+    vector_similarity_threshold: Optional[float] = None,
+    bm25_score_threshold: Optional[float] = None
+) -> Dict[str, Any]:
     """Call the /query-hybrid endpoint (vector + BM25)"""
     start_time = time.time()
+    
+    payload = {"query": query, "n_results": n_results}
+    if vector_similarity_threshold is not None:
+        payload["vector_similarity_threshold"] = vector_similarity_threshold
+    if bm25_score_threshold is not None:
+        payload["bm25_score_threshold"] = bm25_score_threshold
+    
     response = requests.post(
         f"{API_BASE_URL}/query-hybrid",
-        json={"query": query, "n_results": n_results},
+        json=payload,
         timeout=30
     )
     response_time = time.time() - start_time
@@ -141,6 +171,16 @@ def run_comparison():
     print(f"API Base URL: {API_BASE_URL}")
     print(f"Number of test queries: {len(TEST_QUERIES)}")
     print(f"Results per query: {N_RESULTS}")
+    print(f"\n📊 Threshold Settings:")
+    print(f"   • Vector Similarity Threshold: {VECTOR_SIMILARITY_THRESHOLD if VECTOR_SIMILARITY_THRESHOLD is not None else 'Disabled'}")
+    print(f"   • BM25 Score Threshold: {BM25_SCORE_THRESHOLD if BM25_SCORE_THRESHOLD is not None else 'Disabled'}")
+    
+    if VECTOR_SIMILARITY_THRESHOLD is not None or BM25_SCORE_THRESHOLD is not None:
+        print(f"\n⚖️  Absolute Scoring Thresholds ENABLED")
+        print(f"   Results below these thresholds will be filtered before RRF fusion.")
+    else:
+        print(f"\n⚖️  Absolute Scoring Thresholds DISABLED")
+        print(f"   All results participate in RRF fusion (standard hybrid search).")
     
     # Collect results for all queries
     all_vector_results = []
@@ -154,7 +194,10 @@ def run_comparison():
         try:
             # Call vector search
             print("\n📊 Calling vector search endpoint...")
-            vector_result = call_vector_search(query)
+            vector_result = call_vector_search(
+                query,
+                vector_similarity_threshold=VECTOR_SIMILARITY_THRESHOLD
+            )
             all_vector_results.append(vector_result)
             all_response_times["vector"].append(vector_result["response_time"])
             
@@ -163,7 +206,11 @@ def run_comparison():
             
             # Call hybrid search
             print("\n📊 Calling hybrid search endpoint...")
-            hybrid_result = call_hybrid_search(query)
+            hybrid_result = call_hybrid_search(
+                query,
+                vector_similarity_threshold=VECTOR_SIMILARITY_THRESHOLD,
+                bm25_score_threshold=BM25_SCORE_THRESHOLD
+            )
             all_hybrid_results.append(hybrid_result)
             all_response_times["hybrid"].append(hybrid_result["response_time"])
             
@@ -196,7 +243,17 @@ def run_comparison():
                 meta = result["metadata"]
                 print(f"   {j}. [{meta.get('chunk_type', 'unknown')}] {meta.get('filepath', 'unknown')}")
                 print(f"      Combined Score: {result['combined_score']:.4f} "
-                      f"(Vector: {result.get('rrf_dense', 0):.4f}, BM25: {result.get('rrf_bm25', 0):.4f})")
+                      f"(Vector RRF: {result.get('rrf_dense', 0):.4f}, BM25 RRF: {result.get('rrf_bm25', 0):.4f})")
+                
+                # Show raw scores if available (when thresholds are enabled)
+                if 'similarity' in result or 'bm25_score' in result:
+                    raw_scores = []
+                    if 'similarity' in result:
+                        raw_scores.append(f"Similarity: {result['similarity']:.4f}")
+                    if 'bm25_score' in result:
+                        raw_scores.append(f"BM25: {result['bm25_score']:.2f}")
+                    if raw_scores:
+                        print(f"      Raw Scores: {', '.join(raw_scores)}")
             
         except requests.exceptions.RequestException as e:
             print(f"\n❌ Error querying '{query}': {e}")
