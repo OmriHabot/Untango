@@ -300,8 +300,8 @@ ANSWER:"""
                 id=chunk.get("id", "unknown"),
                 content=chunk["content"],
                 metadata=chunk["metadata"],
-                vector_score=chunk["vector_score"],
-                bm25_score=chunk["bm25_score"],
+                vector_score=chunk.get("rrf_dense", 0.0),
+                bm25_score=chunk.get("rrf_bm25", 0.0),
                 combined_score=chunk["combined_score"]
             )
             for chunk in filtered_chunks
