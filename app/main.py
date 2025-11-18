@@ -1,6 +1,7 @@
 """
 FastAPI application for RAG backend with ChromaDB and Vertex AI.
 """
+import logging
 import os
 from fastapi import FastAPI, HTTPException
 
@@ -23,6 +24,14 @@ from .database import (
 )
 from .chunker import chunk_python_code
 from .search import perform_vector_search, perform_hybrid_search
+from .logger import setup_logging, get_logger
+
+
+LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
+JSON_LOGS = os.getenv("APP_LOG_JSON", "false").lower() in {"1", "true", "yes"}
+
+setup_logging(log_level=LOG_LEVEL, json_logs=JSON_LOGS)
+logger = get_logger(__name__)
 
 
 app = FastAPI(
@@ -36,9 +45,19 @@ app = FastAPI(
 async def ingest_code(request: CodeIngestRequest):
     """ingest python code, chunk it via ast, and store in chromadb"""
     try:
+        logger.info(
+            "Ingest request received for repo '%s' file '%s'",
+            request.repo_name,
+            request.filepath
+        )
         chunks = chunk_python_code(request.code, request.filepath, request.repo_name)
         
         if not chunks:
+            logger.warning(
+                "No valid code chunks found for repo '%s' file '%s'",
+                request.repo_name,
+                request.filepath
+            )
             raise HTTPException(status_code=400, detail="no valid code chunks found")
         
         # prepare batch insertion
@@ -61,15 +80,26 @@ async def ingest_code(request: CodeIngestRequest):
             documents=documents,
             metadatas=metadatas
         )
+        logger.info(
+            "Ingested %d chunk(s) into collection '%s'",
+            len(chunks),
+            get_collection_name()
+        )
         
         return {
             "status": "success",
             "chunks_ingested": len(chunks),
             "collection_name": get_collection_name()
         }
-    except HTTPException:
+    except HTTPException as http_exc:
+        logger.warning("Ingest request failed: %s", http_exc.detail)
         raise
     except Exception as e:
+        logger.exception(
+            "Unexpected error during ingestion for repo '%s' file '%s'",
+            request.repo_name,
+            request.filepath
+        )
         raise HTTPException(status_code=500, detail=f"ingestion failed: {str(e)}")
 
 
@@ -80,6 +110,11 @@ async def query_code(request: QueryRequest):
     for hybrid search (vector + bm25), use the /query-hybrid endpoint.
     """
     try:
+        logger.info(
+            "Vector query received: '%s' (top %d)",
+            request.query,
+            request.n_results
+        )
         # perform vector similarity search
         vector_results = perform_vector_search(request.query, request.n_results)
         
@@ -94,13 +129,19 @@ async def query_code(request: QueryRequest):
                     "distance": vector_results["distances"][0][i]
                 })
         
-        return {
+        response = {
             "status": "success",
             "query": request.query,
             "results": formatted_results,
             "count": len(formatted_results)
         }
+        logger.info(
+            "Vector query complete: %d result(s) returned",
+            len(formatted_results)
+        )
+        return response
     except Exception as e:
+        logger.exception("Vector query failed for query '%s'", request.query)
         raise HTTPException(status_code=500, detail=f"query failed: {str(e)}")
 
 
@@ -111,15 +152,26 @@ async def query_hybrid(request: QueryRequest):
     this provides better results by leveraging both semantic and lexical matching.
     """
     try:
+        logger.info(
+            "Hybrid query received: '%s' (top %d)",
+            request.query,
+            request.n_results
+        )
         sorted_results = perform_hybrid_search(request.query, request.n_results)
         
-        return {
+        response = {
             "status": "success",
             "query": request.query,
             "results": sorted_results,
             "count": len(sorted_results)
         }
+        logger.info(
+            "Hybrid query complete: %d result(s) returned",
+            len(sorted_results)
+        )
+        return response
     except Exception as e:
+        logger.exception("Hybrid query failed for query '%s'", request.query)
         raise HTTPException(status_code=500, detail=f"hybrid search failed: {str(e)}")
 
 
@@ -135,12 +187,24 @@ async def query_db(request: RAGQueryRequest) -> RAGQueryResponse:
     3. LLM inference with retrieved context
     """
     try:
+        logger.info(
+            "RAG query received: '%s' (top %d, threshold %.2f, model %s)",
+            request.query,
+            request.n_results,
+            request.confidence_threshold,
+            request.model
+        )
         # Check if GCP is configured
         credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
         location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
         
         if not credentials_path or not project_id:
+            logger.warning(
+                "RAG query blocked: missing GCP configuration (credentials=%s, project=%s)",
+                bool(credentials_path),
+                bool(project_id)
+            )
             raise HTTPException(
                 status_code=503,
                 detail="GCP not configured. Set GOOGLE_APPLICATION_CREDENTIALS and GOOGLE_CLOUD_PROJECT"
@@ -148,6 +212,10 @@ async def query_db(request: RAGQueryRequest) -> RAGQueryResponse:
         
         # Step 1: Perform hybrid search to retrieve relevant chunks
         hybrid_results = perform_hybrid_search(request.query, request.n_results)
+        logger.info(
+            "Hybrid retrieval returned %d chunk(s) for RAG query",
+            len(hybrid_results)
+        )
         
         # Step 2: Filter chunks by confidence threshold
         filtered_chunks = [
@@ -156,6 +224,11 @@ async def query_db(request: RAGQueryRequest) -> RAGQueryResponse:
         ]
         
         if not filtered_chunks:
+            logger.warning(
+                "No chunks passed confidence threshold %.2f for query '%s'",
+                request.confidence_threshold,
+                request.query
+            )
             raise HTTPException(
                 status_code=404,
                 detail=f"No chunks found with confidence > {request.confidence_threshold}. Try lowering the threshold."
@@ -191,6 +264,7 @@ ANSWER:"""
         try:
             from google import genai
         except ImportError:
+            logger.exception("google-genai package not installed for RAG query")
             raise HTTPException(
                 status_code=500,
                 detail="google-genai not installed"
@@ -233,6 +307,12 @@ ANSWER:"""
             for chunk in filtered_chunks
         ]
         
+        logger.info(
+            "RAG answer generated with %d chunk(s) using model %s",
+            len(filtered_chunks),
+            request.model
+        )
+        
         return RAGQueryResponse(
             status="success",
             query=request.query,
@@ -243,9 +323,11 @@ ANSWER:"""
             usage=usage
         )
         
-    except HTTPException:
+    except HTTPException as http_exc:
+        logger.warning("RAG query failed: %s", http_exc.detail)
         raise
     except Exception as e:
+        logger.exception("Unexpected error during RAG query for '%s'", request.query)
         raise HTTPException(
             status_code=500,
             detail=f"RAG query failed: {str(e)}"
@@ -256,6 +338,7 @@ ANSWER:"""
 async def health_check() -> HealthResponse:
     """Check service health including ChromaDB and GCP configuration"""
     try:
+        logger.debug("Health check requested")
         client = get_client()
         heartbeat = client.heartbeat()
         
@@ -265,13 +348,20 @@ async def health_check() -> HealthResponse:
             os.getenv("GOOGLE_CLOUD_PROJECT")
         )
         
-        return HealthResponse(
+        response = HealthResponse(
             status="healthy",
             chroma_heartbeat=heartbeat,
             collection_name=get_collection_name(),
             gcp_configured=gcp_configured
         )
+        logger.info(
+            "Health check success (chroma heartbeat=%s, gcp_configured=%s)",
+            heartbeat,
+            gcp_configured
+        )
+        return response
     except Exception as e:
+        logger.exception("Health check failed")
         raise HTTPException(status_code=503, detail=f"service unavailable: {str(e)}")
 
 
@@ -279,12 +369,16 @@ async def health_check() -> HealthResponse:
 async def delete_collection():
     """delete the entire collection (use with caution)"""
     try:
+        logger.warning("Collection reset requested")
         reset_collection()
-        return {
+        logger.info("Collection '%s' reset successfully", get_collection_name())
+        response = {
             "status": "success",
             "message": f"collection '{get_collection_name()}' reset"
         }
+        return response
     except Exception as e:
+        logger.exception("Collection reset failed")
         raise HTTPException(status_code=500, detail=f"collection reset failed: {str(e)}")
 
 
@@ -295,12 +389,21 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
     Requires GCP credentials to be configured.
     """
     try:
+        logger.info(
+            "Inference request received for model %s",
+            request.model
+        )
         # Check if GCP is configured
         credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
         location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
         
         if not credentials_path or not project_id:
+            logger.warning(
+                "Inference blocked: missing GCP configuration (credentials=%s, project=%s)",
+                bool(credentials_path),
+                bool(project_id)
+            )
             raise HTTPException(
                 status_code=503,
                 detail="GCP not configured. Set GOOGLE_APPLICATION_CREDENTIALS and GOOGLE_CLOUD_PROJECT"
@@ -310,6 +413,7 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
         try:
             from google import genai
         except ImportError:
+            logger.exception("google-genai package not installed for inference")
             raise HTTPException(
                 status_code=500,
                 detail="google-genai not installed"
@@ -340,6 +444,7 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
                 total_tokens=getattr(metadata, 'total_token_count', 0)
             )
         
+        logger.info("Inference completed for model %s", request.model)
         return InferenceResponse(
             status="success",
             model=request.model,
@@ -347,9 +452,11 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
             usage=usage
         )
         
-    except HTTPException:
+    except HTTPException as http_exc:
+        logger.warning("Inference failed: %s", http_exc.detail)
         raise
     except Exception as e:
+        logger.exception("Unexpected error during inference for model %s", request.model)
         raise HTTPException(
             status_code=500,
             detail=f"inference failed: {str(e)}"
@@ -358,6 +465,7 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
 
 if __name__ == "__main__":
     import uvicorn
+    logger.info("Starting RAG backend server on 0.0.0.0:8001")
     uvicorn.run(
         app,
         host="0.0.0.0",
