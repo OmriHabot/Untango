@@ -1,5 +1,50 @@
 # Untango
 
+## RAG Backend with ChromaDB
+
+A FastAPI-based Retrieval-Augmented Generation (RAG) backend that intelligently chunks Python code using AST parsing and provides hybrid search capabilities combining vector similarity and BM25 keyword search.
+
+### Project Structure
+
+```
+app/
+├── __init__.py      # Package initialization
+├── main.py          # FastAPI routes and endpoints
+├── models.py        # Pydantic request/response models
+├── database.py      # ChromaDB client and collection setup
+├── chunker.py       # AST-based code chunking logic
+└── search.py        # Search utilities (vector + BM25 hybrid)
+```
+
+### Features
+
+- **Intelligent Code Chunking**: Uses Python AST parsing to chunk code by functions, classes, and methods
+- **Hybrid Search**: Combines vector similarity search with BM25 keyword matching for better retrieval
+- **Code-Aware Tokenization**: Custom tokenization for code that handles camelCase, snake_case, and special characters
+- **ChromaDB Integration**: Persistent vector storage with automatic embedding generation
+
+### API Endpoints
+
+- `POST /ingest` - Ingest Python code files and chunk them intelligently
+- `POST /query` - Vector similarity search
+- `POST /query-hybrid` - Hybrid search (vector + BM25)
+- `GET /health` - Health check for ChromaDB connection
+- `DELETE /collection` - Reset the collection (use with caution)
+
+### Running the Application
+
+```bash
+# Start ChromaDB and the application using Docker Compose
+docker-compose up
+
+# Or run locally (requires ChromaDB running separately)
+python -m app.main
+```
+
+The API will be available at `http://localhost:8001`
+
+---
+
 ## GCP Sample Inference
 
 This guide demonstrates how to run inference using Google Cloud Platform's Vertex AI with the Gemini API. The example includes token usage tracking and cost estimation.
