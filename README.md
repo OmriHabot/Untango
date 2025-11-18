@@ -35,6 +35,7 @@ Visit: http://localhost:8001/docs for interactive API documentation
 | `/ingest` | POST | Ingest and chunk Python code |
 | `/query` | POST | Vector similarity search |
 | `/query-hybrid` | POST | Hybrid search (vector + BM25) |
+| `/query-db` | POST | **Complete RAG pipeline**: Retrieve + Generate with Vertex AI |
 | `/inference` | POST | Generate AI responses via Vertex AI |
 | `/health` | GET | Service health check |
 | `/collection` | DELETE | Reset the collection |
@@ -73,7 +74,34 @@ curl -X POST "http://localhost:8001/query-hybrid" \
   -d '{"query": "authentication function", "n_results": 5}'
 ```
 
-### Generate AI Response
+### RAG Query (Retrieve + Generate)
+
+The `/query-db` endpoint is the **complete RAG pipeline** that:
+1. Retrieves relevant chunks using hybrid search
+2. Filters by confidence threshold (default: 0.2)
+3. Builds a context-aware prompt
+4. Generates an answer using Vertex AI
+
+```bash
+curl -X POST "http://localhost:8001/query-db" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How does authentication work in this codebase?",
+    "n_results": 10,
+    "confidence_threshold": 0.2,
+    "model": "gemini-2.0-flash-exp"
+  }'
+```
+
+Response includes:
+- **answer**: AI-generated response
+- **retrieved_chunks**: All chunks used for context
+- **chunks_used**: Number of chunks above confidence threshold
+- **usage**: Token usage and cost information
+
+### Generate AI Response (Direct)
+
+For direct inference without retrieval:
 
 ```bash
 curl -X POST "http://localhost:8001/inference" \

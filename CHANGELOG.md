@@ -1,5 +1,52 @@
 # Changelog
 
+## v1.1.0 - Complete RAG Pipeline
+
+### 🎉 New Feature: End-to-End RAG Platform
+
+**New Endpoint: `/query-db`**
+- ✅ Complete RAG pipeline combining retrieval + generation
+- ✅ Hybrid search (vector + BM25) for intelligent chunk retrieval
+- ✅ Confidence-based filtering (default threshold: 0.2)
+- ✅ Context-aware prompt construction
+- ✅ GCP Vertex AI integration for answer generation
+- ✅ Comprehensive response with chunks, scores, and token usage
+
+**New Models Added**
+- `RAGQueryRequest` - Complete RAG query with configurable parameters
+- `RAGQueryResponse` - Detailed response with answer and retrieved chunks
+- `RetrievedChunk` - Chunk metadata with vector, BM25, and combined scores
+
+**Usage Example**
+```bash
+curl -X POST "http://localhost:8001/query-db" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How does authentication work?",
+    "n_results": 10,
+    "confidence_threshold": 0.2,
+    "model": "gemini-2.0-flash-exp"
+  }'
+```
+
+**Response includes:**
+- AI-generated answer based on retrieved context
+- All chunks used (with vector, BM25, combined scores)
+- Token usage and estimated cost
+- Metadata for each chunk (file, type, location)
+
+**Test Suite Added**
+- `test_rag_pipeline.py` - Comprehensive test script
+- Tests: health → ingest → hybrid search → RAG query
+- Demonstrates complete end-to-end workflow
+
+### 📚 Documentation Updates
+- README updated with `/query-db` endpoint documentation
+- Usage examples for complete RAG workflow
+- Response structure documented
+
+---
+
 ## v1.0.0 - Production Ready Release
 
 ### 🎉 Major Changes
