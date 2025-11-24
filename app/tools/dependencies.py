@@ -52,3 +52,40 @@ def list_package_files(package_name: str) -> str:
         return f"Files in {package_name} ({path}):\n" + "\n".join(sorted(items)[:100]) # Limit to 100 files
     except Exception as e:
         return f"Error listing package files: {str(e)}"
+
+
+def read_package_file(package_name: str, filepath: str, max_lines: int = 500) -> str:
+    """
+    Read a file from an installed package.
+    Args:
+        package_name: Name of the package (e.g., 'fastapi', 'chromadb')
+        filepath: Relative path within the package (e.g., 'api/client.py')
+        max_lines: Maximum number of lines to read
+    Returns:
+        File content or error message
+    """
+    package_path = get_package_path(package_name)
+    if package_path.startswith("Error"):
+        return package_path
+    
+    full_path = os.path.join(package_path, filepath)
+    
+    try:
+        if not os.path.exists(full_path):
+            return f"Error: File '{filepath}' does not exist in package '{package_name}'. Full path: {full_path}"
+        
+        if os.path.isdir(full_path):
+            return f"Error: '{filepath}' is a directory, not a file."
+        
+        content_lines = []
+        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+            for i, line in enumerate(f):
+                if i >= max_lines:
+                    content_lines.append(f"\n... (truncated after {max_lines} lines) ...")
+                    break
+                content_lines.append(line)
+        
+        return "".join(content_lines)
+    except Exception as e:
+        logger.error(f"read_package_file failed for {package_name}/{filepath}: {e}")
+        return f"Error reading package file: {str(e)}"

@@ -17,7 +17,7 @@ from google.genai import types
 
 from ..models import ChatRequest, ChatResponse, TokenUsage
 from ..tools.filesystem import list_files, read_file
-from ..tools.dependencies import list_package_files
+from ..tools.dependencies import list_package_files, read_package_file
 from ..search import perform_hybrid_search
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,8 @@ tools_map = {
     "rag_search": rag_search,
     "list_files": list_files,
     "read_file": read_file,
-    "list_package_files": list_package_files
+    "list_package_files": list_package_files,
+    "read_package_file": read_package_file
 }
 
 # Define tool schemas for Vertex AI
@@ -98,6 +99,19 @@ rag_tool = types.Tool(
                     "package_name": types.Schema(type=types.Type.STRING, description="Name of the package (e.g. 'fastapi')")
                 },
                 required=["package_name"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="read_package_file",
+            description="Read a specific file from an installed package. Use this after list_package_files to read dependency source code.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "package_name": types.Schema(type=types.Type.STRING, description="Name of the package (e.g. 'chromadb')"),
+                    "filepath": types.Schema(type=types.Type.STRING, description="Relative path within package (e.g. 'api/client.py')"),
+                    "max_lines": types.Schema(type=types.Type.INTEGER, description="Max lines to read (default 500)")
+                },
+                required=["package_name", "filepath"]
             )
         )
     ]

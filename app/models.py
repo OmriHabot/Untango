@@ -159,7 +159,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for chat"""
     messages: List[Message] = Field(..., description="Chat history")
-    model: str = Field(default="gemini-2.0-flash-exp", description="Model to use")
+    model: str = Field(default="gemini-2.5-flash-lite", description="Model to use")  # Field(default="gemini-2.0-flash-exp", description="Model to use")
 
 
 class ChatResponse(BaseModel):
