@@ -117,3 +117,54 @@ class RAGQueryResponse(BaseModel):
     model: str
     usage: Optional[TokenUsage] = None
 
+
+class EnvInfo(BaseModel):
+    """Environment information"""
+    os_info: str
+    python_version: str
+    cuda_available: bool
+    gpu_info: str
+    installed_packages: List[str]
+
+
+class RepoMap(BaseModel):
+    """Repository structure map"""
+    repo_name: str
+    root_path: str
+    structure: Dict[str, Any]
+    entry_points: List[str]
+    dependencies: List[str]
+
+
+class RunbookRequest(BaseModel):
+    """Request model for generating a runbook"""
+    repo_path: str = Field(..., description="Absolute path to the repository")
+    repo_name: str = Field(..., description="Name of the repository")
+
+
+class RunbookResponse(BaseModel):
+    """Response model for runbook generation"""
+    status: str
+    runbook: str
+    env_info: EnvInfo
+    repo_map: RepoMap
+
+
+class Message(BaseModel):
+    """Chat message model"""
+    role: str = Field(..., description="Role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message content")
+
+
+class ChatRequest(BaseModel):
+    """Request model for chat"""
+    messages: List[Message] = Field(..., description="Chat history")
+    model: str = Field(default="gemini-2.0-flash-exp", description="Model to use")
+
+
+class ChatResponse(BaseModel):
+    """Response model for chat"""
+    status: str
+    response: str
+    usage: Optional[TokenUsage] = None
+

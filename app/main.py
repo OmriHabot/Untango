@@ -4,6 +4,7 @@ FastAPI application for RAG backend with ChromaDB and Vertex AI.
 import logging
 import os
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 
 from .models import (
     CodeIngestRequest,
@@ -14,7 +15,13 @@ from .models import (
     TokenUsage,
     RAGQueryRequest,
     RAGQueryResponse,
-    RetrievedChunk
+    RAGQueryRequest,
+    RAGQueryResponse,
+    RetrievedChunk,
+    RunbookRequest,
+    RunbookResponse,
+    ChatRequest,
+    ChatResponse
 )
 from .database import (
     get_collection,
@@ -25,6 +32,9 @@ from .database import (
 from .chunker import chunk_python_code
 from .search import perform_vector_search, perform_hybrid_search
 from .logger import setup_logging, get_logger
+from .orchestrator import generate_runbook_orchestrator
+from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
+from .ingest_manager import ingest_manager
 
 
 LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
@@ -312,6 +322,10 @@ ANSWER:"""
                 output_tokens=getattr(metadata, 'candidates_token_count', 0),
                 total_tokens=getattr(metadata, 'total_token_count', 0)
             )
+            logger.info(
+                "RAG query token usage: input=%d, output=%d, total=%d",
+                usage.input_tokens, usage.output_tokens, usage.total_tokens
+            )
         
         # Step 6: Format retrieved chunks for response
         retrieved_chunks = [
@@ -462,6 +476,10 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
                 output_tokens=getattr(metadata, 'candidates_token_count', 0),
                 total_tokens=getattr(metadata, 'total_token_count', 0)
             )
+            logger.info(
+                "Inference token usage: input=%d, output=%d, total=%d",
+                usage.input_tokens, usage.output_tokens, usage.total_tokens
+            )
         
         logger.info("Inference completed for model %s", request.model)
         return InferenceResponse(
@@ -480,6 +498,54 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
             status_code=500,
             detail=f"inference failed: {str(e)}"
         )
+
+
+@app.post("/generate-runbook", response_model=RunbookResponse)
+async def generate_runbook(request: RunbookRequest) -> RunbookResponse:
+    """
+    Generate a comprehensive runbook for a repository.
+    Orchestrates environment scanning, repo mapping, and LLM generation.
+    """
+    logger.info("Runbook generation requested for repo '%s'", request.repo_name)
+    return await generate_runbook_orchestrator(request)
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest) -> ChatResponse:
+    """
+    Chat with the agent about the codebase.
+    Supports RAG, file exploration, and dependency inspection.
+    """
+    logger.info("Chat request received")
+    
+    # Trigger smart ingestion (background sync)
+    # We await it to ensure consistency for the current query
+    try:
+        await ingest_manager.sync_repo()
+    except Exception as e:
+        logger.error(f"Smart ingestion failed: {e}")
+        
+    return await chat_with_agent(request)
+
+
+@app.post("/chat-stream")
+async def chat_stream_endpoint(request: ChatRequest):
+    """
+    Chat with the agent with streaming response.
+    Returns a stream of JSON events.
+    """
+    logger.info("Chat stream request received")
+    
+    # Trigger smart ingestion (background sync)
+    try:
+        await ingest_manager.sync_repo()
+    except Exception as e:
+        logger.error(f"Smart ingestion failed: {e}")
+        
+    return StreamingResponse(
+        chat_with_agent_stream(request),
+        media_type="application/x-ndjson"
+    )
 
 
 if __name__ == "__main__":

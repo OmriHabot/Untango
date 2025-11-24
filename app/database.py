@@ -98,3 +98,16 @@ def reset_collection() -> Collection:
     assert _collection is not None, "Collection should be initialized"
     return _collection
 
+
+def delete_file_chunks(filepath: str):
+    """
+    Delete all chunks associated with a specific file.
+    Uses metadata filtering: where={"filepath": filepath}
+    """
+    collection = get_collection()
+    try:
+        # Note: ChromaDB delete uses 'where' filter for metadata
+        collection.delete(where={"filepath": filepath})
+    except Exception as e:
+        # Log but don't crash if delete fails (e.g. if collection empty)
+        print(f"Warning: Failed to delete chunks for {filepath}: {e}")
