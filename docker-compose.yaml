@@ -24,6 +24,7 @@ services:
     volumes:
       - ./app:/app/app
       - ./service-account-key.json:/app/gcp-key.json:ro
+      - repos_data:/app/repos
     environment:
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
@@ -37,3 +38,4 @@ services:
 
 volumes:
   chroma_data:
+  repos_data:

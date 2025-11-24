@@ -55,7 +55,8 @@ def perform_vector_search(
     query: str,
     n_results: int,
     similarity_threshold: Optional[float] = None,
-    distance_metric: str = "cosine"
+    distance_metric: str = "cosine",
+    repo_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Perform vector similarity search using chromadb with optional threshold filtering.
@@ -66,6 +67,7 @@ def perform_vector_search(
         similarity_threshold: Minimum similarity score (0-1) to include result.
                             Results below this threshold are filtered out.
         distance_metric: Distance metric used by ChromaDB ("cosine", "l2", "ip")
+        repo_id: Optional repository ID to filter results
     
     Returns:
         Dictionary with filtered results
@@ -75,10 +77,14 @@ def perform_vector_search(
     # Fetch more results if we're filtering, to ensure we get n_results after filtering
     fetch_count = n_results * 3 if similarity_threshold is not None else n_results
     
+    # Build where clause for repo filtering
+    where_clause = {"repo_id": repo_id} if repo_id else None
+    
     vector_results = collection.query(
         query_texts=[query],
         n_results=fetch_count,
-        include=["documents", "metadatas", "distances"]
+        include=["documents", "metadatas", "distances"],
+        where=where_clause
     )
     
     # Apply similarity threshold if specified
@@ -131,7 +137,8 @@ def perform_hybrid_search(
     n_results: int,
     vector_similarity_threshold: Optional[float] = None,
     bm25_score_threshold: Optional[float] = None,
-    distance_metric: str = "cosine"
+    distance_metric: str = "cosine",
+    repo_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Hybrid search combining vector similarity and BM25 keyword search,
@@ -146,11 +153,15 @@ def perform_hybrid_search(
         bm25_score_threshold: Minimum BM25 score to include in fusion.
                              Documents below this are excluded from BM25 ranking.
         distance_metric: Distance metric used by ChromaDB ("cosine", "l2", "ip")
+        repo_id: Optional repository ID to filter results
     
     Returns:
         List of fused results sorted by combined RRF score
     """
     collection = get_collection()
+
+    # Build where clause for repo filtering
+    where_clause = {"repo_id": repo_id} if repo_id else None
 
     # get a reasonably large candidate set from the dense index
     vector_k = max(n_results * 3, n_results)
@@ -158,6 +169,7 @@ def perform_hybrid_search(
         query_texts=[query],
         n_results=vector_k,
         include=["documents", "metadatas", "distances"],  # removed "ids" - they're always returned
+        where=where_clause
     )
 
     # ids are returned by default, so we can access them directly
@@ -188,7 +200,7 @@ def perform_hybrid_search(
         vector_distances = [vector_distances[i] for i in filtered_indices]
 
     # for BM25 we need the full document set (or a large subset) as in the docs' BM25 examples
-    all_docs = collection.get(include=["documents", "metadatas"])  # removed "ids" here too
+    all_docs = collection.get(include=["documents", "metadatas"], where=where_clause)  # Apply repo filter
     if not all_docs["documents"]:
         return []
 

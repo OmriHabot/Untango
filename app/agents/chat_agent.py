@@ -19,6 +19,7 @@ from ..models import ChatRequest, ChatResponse, TokenUsage
 from ..tools.filesystem import list_files, read_file
 from ..tools.dependencies import list_package_files, read_package_file
 from ..search import perform_hybrid_search
+from ..active_repo_state import active_repo_state
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,9 @@ def rag_search(query: str) -> str:
     Use this to find relevant code snippets or answer questions about the codebase logic.
     """
     try:
-        results = perform_hybrid_search(query, n_results=5)
+        # Get active repository ID for filtering
+        repo_id = active_repo_state.get_active_repo_id()
+        results = perform_hybrid_search(query, n_results=5, repo_id=repo_id)
         if not results:
             return "No relevant code found."
         

@@ -14,32 +14,36 @@ from .database import get_collection, get_collection_name, delete_file_chunks
 
 logger = logging.getLogger(__name__)
 
-CACHE_FILE = ".ingest_cache.json"
+CACHE_DIR = ".ingest_cache"
 IGNORE_DIRS = {'.git', '__pycache__', '.venv', 'venv', 'node_modules', '.idea', '.vscode', 'data'}
 EXTENSIONS = {'.py', '.md'}
 
 class IngestManager:
-    def __init__(self, repo_path: str = "."):
+    def __init__(self, repo_path: str = ".", repo_id: str = "default", repo_name: str = "Untango"):
         self.repo_path = repo_path
+        self.repo_id = repo_id
+        self.repo_name = repo_name
+        self.cache_file = os.path.join(CACHE_DIR, f"{repo_id}.json")
+        os.makedirs(CACHE_DIR, exist_ok=True)
         self.cache: Dict[str, float] = self._load_cache()
         
     def _load_cache(self) -> Dict[str, float]:
-        """Load cache from disk."""
-        if os.path.exists(CACHE_FILE):
+        """Load cache from disk (per-repository cache file)."""
+        if os.path.exists(self.cache_file):
             try:
-                with open(CACHE_FILE, 'r') as f:
+                with open(self.cache_file, 'r') as f:
                     return json.load(f)
             except Exception as e:
-                logger.warning(f"Failed to load cache: {e}")
+                logger.warning(f"Failed to load cache for {self.repo_id}: {e}")
         return {}
         
     def _save_cache(self):
-        """Save cache to disk."""
+        """Save cache to disk (per-repository cache file)."""
         try:
-            with open(CACHE_FILE, 'w') as f:
+            with open(self.cache_file, 'w') as f:
                 json.dump(self.cache, f)
         except Exception as e:
-            logger.warning(f"Failed to save cache: {e}")
+            logger.warning(f"Failed to save cache for {self.repo_id}: {e}")
 
     async def sync_repo(self):
         """
@@ -113,11 +117,8 @@ class IngestManager:
             delete_file_chunks(rel_path)
             
             # 2. Chunk and add new
-            # We assume repo_name is "Untango" or derived from path
-            repo_name = "Untango" 
-            
             if rel_path.endswith('.py'):
-                chunks = chunk_python_code(code, rel_path, repo_name)
+                chunks = chunk_python_code(code, rel_path, self.repo_name)
             else:
                 # Simple chunking for non-python files (e.g. Markdown)
                 # Treat the whole file as one chunk for now, or split by paragraphs if needed.
@@ -128,7 +129,8 @@ class IngestManager:
                     "content": code,
                     "metadata": {
                         "filepath": rel_path,
-                        "repo_name": repo_name,
+                        "repo_id": self.repo_id,
+                        "repo_name": self.repo_name,
                         "chunk_type": "text",
                         "start_line": 1,
                         "end_line": len(code.splitlines()),
@@ -147,6 +149,8 @@ class IngestManager:
                 for key, value in chunk["metadata"].items():
                     if value is not None:
                         filtered_metadata[key] = value
+                # Ensure repo_id is always present
+                filtered_metadata["repo_id"] = self.repo_id
                 metadatas.append(filtered_metadata)
             
             collection = get_collection()
@@ -159,5 +163,5 @@ class IngestManager:
         except Exception as e:
             logger.error(f"Failed to ingest {rel_path}: {e}")
 
-# Global instance
-ingest_manager = IngestManager()
+# Global instance for the default (local) repository
+ingest_manager = IngestManager(repo_path=".", repo_id="default", repo_name="Untango")

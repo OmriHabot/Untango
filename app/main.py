@@ -21,7 +21,12 @@ from .models import (
     RunbookRequest,
     RunbookResponse,
     ChatRequest,
-    ChatResponse
+    ChatResponse,
+    RepositorySource,
+    IngestRepositoryRequest,
+    RepositoryInfo,
+    SetActiveRepositoryRequest,
+    ListRepositoriesResponse
 )
 from .database import (
     get_collection,
@@ -30,11 +35,13 @@ from .database import (
     reset_collection
 )
 from .chunker import chunk_python_code
-from .search import perform_vector_search, perform_hybrid_search
+from .ingest_manager import ingest_manager, IngestManager
+from .repo_manager import repo_manager, RepositoryContext
+from .active_repo_state import active_repo_state
+from .search import perform_hybrid_search
 from .logger import setup_logging, get_logger
 from .orchestrator import generate_runbook_orchestrator
 from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
-from .ingest_manager import ingest_manager
 
 
 LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
@@ -543,9 +550,84 @@ async def chat_stream_endpoint(request: ChatRequest):
         logger.error(f"Smart ingestion failed: {e}")
         
     return StreamingResponse(
-        chat_with_agent_stream(request),
-        media_type="application/x-ndjson"
-    )
+            chat_with_agent_stream(request),
+            media_type="application/x-ndjson"
+        )
+
+
+@app.post("/ingest-repository", response_model=RepositoryInfo)
+async def ingest_repository_endpoint(request: IngestRepositoryRequest) -> RepositoryInfo:
+    """
+    Ingest a repository from GitHub or local filesystem.
+    Creates a repository context, clones if needed, and ingests all files.
+    """
+    logger.info(f"Ingesting repository: {request.source.type} - {request.source.location}")
+    
+    try:
+        # Create repository context
+        repo_context = repo_manager.create_repository_context(
+            source_type=request.source.type,
+            source_location=request.source.location,
+            branch=request.source.branch if request.source.type == "github" else None,
+            parse_dependencies=request.parse_dependencies
+        )
+        
+        logger.info(f"Repository context created: {repo_context.repo_id} - {repo_context.repo_name}")
+        
+        # Create IngestManager for this repository
+        repo_ingest_manager = IngestManager(
+            repo_path=repo_context.repo_path,
+            repo_id=repo_context.repo_id,
+            repo_name=repo_context.repo_name
+        )
+        
+        # Sync the repository
+        await repo_ingest_manager.sync_repo()
+        
+        # Count files (approximate from cache)
+        file_count = len(repo_ingest_manager.cache)
+        
+        # Set as active repository
+        active_repo_state.set_active_repo_id(repo_context.repo_id)
+        
+        return RepositoryInfo(
+            repo_id=repo_context.repo_id,
+            repo_name=repo_context.repo_name,
+            source_type=repo_context.source_type,
+            source_location=repo_context.source_location,
+            local_path=repo_context.repo_path,
+            dependencies=repo_context.dependencies,
+            file_count=file_count
+        )
+    except Exception as e:
+        logger.exception("Repository ingestion failed")
+        raise HTTPException(status_code=500, detail=f"Failed to ingest repository: {str(e)}")
+
+
+@app.post("/set-active-repository")
+async def set_active_repository_endpoint(request: SetActiveRepositoryRequest) -> dict:
+    """
+    Set the active repository for queries.
+    """
+    logger.info(f"Setting active repository: {request.repo_id}")
+    active_repo_state.set_active_repo_id(request.repo_id)
+    
+    return {
+        "status": "success",
+        "active_repo_id": request.repo_id,
+        "message": f"Active repository set to {request.repo_id}"
+    }
+
+
+@app.get("/active-repository")
+async def get_active_repository_endpoint() -> dict:
+    """
+    Get the currently active repository.
+    """
+    repo_id = active_repo_state.get_active_repo_id()
+    return {
+        "active_repo_id": repo_id
+    }
 
 
 if __name__ == "__main__":

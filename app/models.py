@@ -38,6 +38,7 @@ class InferenceRequest(BaseModel):
 class ChunkMetadata(BaseModel):
     """Metadata for each code chunk"""
     filepath: str
+    repo_id: Optional[str] = None  # Repository ID for multi-repo support
     repo_name: str
     chunk_type: str
     start_line: int
@@ -168,3 +169,37 @@ class ChatResponse(BaseModel):
     response: str
     usage: Optional[TokenUsage] = None
 
+
+class RepositorySource(BaseModel):
+    """Source specification for a repository"""
+    type: str = Field(..., description="Source type: 'github' or 'local'")
+    location: str = Field(..., description="GitHub URL or local filesystem path")
+    branch: Optional[str] = Field(default="main", description="Git branch for GitHub repos")
+
+
+class IngestRepositoryRequest(BaseModel):
+    """Request to ingest a repository from a source"""
+    source: RepositorySource
+    parse_dependencies: bool = Field(default=True, description="Parse and detect dependencies")
+
+
+class RepositoryInfo(BaseModel):
+    """Information about an ingested repository"""
+    repo_id: str
+    repo_name: str
+    source_type: str
+    source_location: str
+    local_path: str
+    dependencies: List[str]
+    file_count: int
+
+
+class SetActiveRepositoryRequest(BaseModel):
+    """Request to set the active repository"""
+    repo_id: str
+
+
+class ListRepositoriesResponse(BaseModel):
+    """Response listing all ingested repositories"""
+    repositories: List[RepositoryInfo]
+    active_repo_id: Optional[str] = None
