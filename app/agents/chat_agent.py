@@ -22,6 +22,18 @@ from ..search import perform_hybrid_search
 
 logger = logging.getLogger(__name__)
 
+# Pricing for gemini-2.5-flash (per million tokens)
+INPUT_PRICE_PER_MILLION = 0.30  # $0.30 per million tokens
+OUTPUT_PRICE_PER_MILLION = 2.50  # $2.50 per million tokens
+
+def calculate_cost(input_tokens: int, output_tokens: int) -> tuple[float, float, float]:
+    """Calculate cost based on token usage.
+    Returns: (input_cost, output_cost, total_cost) in USD"""
+    input_cost = (input_tokens / 1_000_000) * INPUT_PRICE_PER_MILLION
+    output_cost = (output_tokens / 1_000_000) * OUTPUT_PRICE_PER_MILLION
+    total_cost = input_cost + output_cost
+    return input_cost, output_cost, total_cost
+
 # --- Tool Wrappers for Vertex AI ---
 
 def rag_search(query: str) -> str:
@@ -223,9 +235,11 @@ The user is asking about THIS repository (Untango), so search the codebase to fi
                     output_tokens=getattr(meta, 'candidates_token_count', 0),
                     total_tokens=getattr(meta, 'total_token_count', 0)
                 )
+                input_cost, output_cost, total_cost = calculate_cost(usage.input_tokens, usage.output_tokens)
                 logger.info(
-                    "Token usage for turn %d: input=%d, output=%d, total=%d",
-                    current_turn, usage.input_tokens, usage.output_tokens, usage.total_tokens
+                    "Token usage for turn %d: input=%d, output=%d, total=%d, cost=$%.6f (input=$%.6f, output=$%.6f)",
+                    current_turn, usage.input_tokens, usage.output_tokens, usage.total_tokens,
+                    total_cost, input_cost, output_cost
                 )
 
             # Check for function calls
