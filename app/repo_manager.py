@@ -7,6 +7,7 @@ import os
 import shutil
 import hashlib
 import ast
+import json
 import logging
 from dataclasses import dataclass
 from typing import List, Set, Optional
@@ -64,8 +65,13 @@ class RepositoryManager:
         else:
             logger.info(f"Cloning repository from {url}")
             try:
+                cmd = ["git", "clone"]
+                if branch:
+                    cmd.extend(["-b", branch])
+                cmd.extend([url, repo_path])
+                
                 subprocess.run(
-                    ["git", "clone", "-b", branch, url, repo_path],
+                    cmd,
                     check=True,
                     capture_output=True
                 )
@@ -171,7 +177,7 @@ class RepositoryManager:
         
         # Step 1: Get local path
         if source_type == "github":
-            repo_path = self.clone_github_repo(source_location, branch or "main")
+            repo_path = self.clone_github_repo(source_location, branch)
         elif source_type == "local":
             repo_path = self.validate_local_path(source_location)
         else:
@@ -191,7 +197,7 @@ class RepositoryManager:
             # Combine and deduplicate
             dependencies = list(set(req_deps) | import_deps)
         
-        return RepositoryContext(
+        context = RepositoryContext(
             repo_id=repo_id,
             repo_name=repo_name,
             repo_path=repo_path,
@@ -199,7 +205,54 @@ class RepositoryManager:
             source_location=source_location,
             dependencies=dependencies
         )
+        
+        # Persist metadata
+        self.save_metadata(context)
+        
+        return context
     
+    def save_metadata(self, context: RepositoryContext):
+        """Save repository metadata to a JSON file."""
+        metadata_path = os.path.join(context.repo_path, "repo_info.json")
+        try:
+            with open(metadata_path, 'w') as f:
+                json.dump({
+                    "repo_id": context.repo_id,
+                    "repo_name": context.repo_name,
+                    "source_type": context.source_type,
+                    "source_location": context.source_location
+                }, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save metadata for {context.repo_id}: {e}")
+
+    def get_metadata(self, repo_path: str) -> dict:
+        """Get repository metadata, falling back to git config if needed."""
+        metadata_path = os.path.join(repo_path, "repo_info.json")
+        
+        # Try reading saved metadata
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        
+        # Fallback: Try to get name from git config
+        repo_name = "Unknown"
+        try:
+            # Check for .git/config
+            git_config = os.path.join(repo_path, ".git", "config")
+            if os.path.exists(git_config):
+                with open(git_config, 'r') as f:
+                    content = f.read()
+                    if 'url = ' in content:
+                        url = content.split('url = ')[1].split('\n')[0].strip()
+                        repo_name = self.get_repository_name(repo_path, url)
+        except Exception:
+            pass
+            
+        return {"repo_name": repo_name}
+
     def list_repositories(self) -> List[dict]:
         """List all available repositories."""
         repos = []
@@ -209,11 +262,14 @@ class RepositoryManager:
         for repo_id in os.listdir(self.repos_base_path):
             repo_path = os.path.join(self.repos_base_path, repo_id)
             if os.path.isdir(repo_path):
-                # Try to determine name (fallback to ID)
-                # In a real app, we'd persist metadata properly.
-                # For now, we'll just return what we have.
+                metadata = self.get_metadata(repo_path)
+                name = metadata.get("repo_name", repo_id)
+                if name == "Unknown":
+                    name = repo_id
+                
                 repos.append({
                     "repo_id": repo_id,
+                    "name": name,
                     "path": repo_path
                 })
         return repos

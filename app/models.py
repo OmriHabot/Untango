@@ -174,7 +174,7 @@ class RepositorySource(BaseModel):
     """Source specification for a repository"""
     type: str = Field(..., description="Source type: 'github' or 'local'")
     location: str = Field(..., description="GitHub URL or local filesystem path")
-    branch: Optional[str] = Field(default="main", description="Git branch for GitHub repos")
+    branch: Optional[str] = Field(default=None, description="Git branch for GitHub repos")
 
 
 class IngestRepositoryRequest(BaseModel):
@@ -203,6 +203,7 @@ class SetActiveRepositoryRequest(BaseModel):
 class RepositorySummary(BaseModel):
     """Summary of a repository"""
     repo_id: str
+    name: str
     path: str
 
 

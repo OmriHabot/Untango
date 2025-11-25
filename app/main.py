@@ -5,6 +5,7 @@ import logging
 import os
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from .models import (
     CodeIngestRequest,
@@ -55,6 +56,15 @@ app = FastAPI(
     title="RAG Backend",
     description="Intelligent code chunking and retrieval with hybrid search",
     version="1.0.0"
+)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
