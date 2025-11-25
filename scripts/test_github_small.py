@@ -1,42 +1,44 @@
 """
-Test script for ingesting pandas from GitHub.
-DO NOT RUN THIS - it will clone the entire pandas repository which is large.
-This is for demonstration/testing purposes only.
+Test script for ingesting requests from GitHub.
+This uses a smaller repository (psf/requests) for faster testing.
 """
 import requests
 import json
+import time
+import sys
 
 API_URL = "http://localhost:8001"
 
 
-def test_pandas_github_ingestion():
-    """Test ingesting pandas from GitHub."""
-    print("Testing GitHub repository ingestion (pandas)...")
-    print("WARNING: This will clone the entire pandas repository (~500MB+)")
+def test_requests_github_ingestion():
+    """Test ingesting requests from GitHub."""
+    print("Testing GitHub repository ingestion (psf/requests)...")
     
     payload = {
         "source": {
             "type": "github",
-            "location": "https://github.com/pandas-dev/pandas.git",
+            "location": "https://github.com/psf/requests.git",
             "branch": "main"
         },
         "parse_dependencies": True
     }
     
     print(f"\nIngesting: {payload['source']['location']}")
-    print("This may take several minutes...")
     
-    response = requests.post(f"{API_URL}/ingest-repository", json=payload, timeout=30)
+    try:
+        response = requests.post(f"{API_URL}/ingest-repository", json=payload, timeout=30)
+    except requests.exceptions.ConnectionError:
+        print(f"\n✗ Could not connect to {API_URL}. Is the server running?")
+        return None
     
     if response.status_code == 200:
         data = response.json()
         repo_id = data['repo_id']
-        print(f"\n✓ Ingestion started for pandas:")
+        print(f"\n✓ Ingestion started for requests:")
         print(f"  - Repo ID: {repo_id}")
         print(f"  - Status: {data.get('status', 'unknown')}")
         
         # Poll for completion
-        import time
         print("\nWaiting for ingestion to complete...", end="", flush=True)
         start_time = time.time()
         while True:
@@ -51,12 +53,12 @@ def test_pandas_github_ingestion():
                         print("\n✗ Ingestion failed!")
                         return None
                 
-                if time.time() - start_time > 600:  # 10 minute timeout
+                if time.time() - start_time > 300:  # 5 minute timeout
                     print("\n✗ Timeout waiting for ingestion")
                     return None
                     
                 print(".", end="", flush=True)
-                time.sleep(5)
+                time.sleep(2)
             except Exception as e:
                 print(f"\nError polling status: {e}")
                 return None
@@ -68,18 +70,22 @@ def test_pandas_github_ingestion():
         return None
 
 
-def test_query_pandas():
-    """Test querying the pandas repository."""
+def test_query_requests():
+    """Test querying the requests repository."""
     print("\n" + "="*60)
-    print("Testing query on pandas repository...")
+    print("Testing query on requests repository...")
     
     payload = {
         "messages": [
-            {"role": "user", "content": "What is the main purpose of the pandas library? Give a brief overview based on the codebase."}
+            {"role": "user", "content": "How do I make a simple GET request using this library? Show me a code example based on the docs."}
         ]
     }
     
-    response = requests.post(f"{API_URL}/chat", json=payload)
+    try:
+        response = requests.post(f"{API_URL}/chat", json=payload)
+    except requests.exceptions.ConnectionError:
+        print(f"\n✗ Could not connect to {API_URL}")
+        return False
     
     if response.status_code == 200:
         data = response.json()
@@ -104,7 +110,11 @@ def test_get_active_repo():
     print("\n" + "="*60)
     print("Checking active repository...")
     
-    response = requests.get(f"{API_URL}/active-repository")
+    try:
+        response = requests.get(f"{API_URL}/active-repository")
+    except requests.exceptions.ConnectionError:
+        print(f"\n✗ Could not connect to {API_URL}")
+        return None
     
     if response.status_code == 200:
         data = response.json()
@@ -118,52 +128,43 @@ def test_get_active_repo():
 def main():
     """Run all tests."""
     print("=" * 60)
-    print("Pandas GitHub Repository Ingestion Test")
+    print("Requests GitHub Repository Ingestion Test")
     print("=" * 60)
     
     # Get current active repo
     initial_repo = test_get_active_repo()
-    
-    # Ingest pandas
-    pandas_repo_id = test_pandas_github_ingestion()
-    if not pandas_repo_id:
-        print("\n✗ Pandas ingestion failed")
+    if initial_repo is None and False: # Skip check if server down, but we handled connection error above
+       pass
+
+    # Ingest requests
+    requests_repo_id = test_requests_github_ingestion()
+    if not requests_repo_id:
+        print("\n✗ Requests ingestion failed")
         return
     
     # Verify it's now active
     active_repo = test_get_active_repo()
-    if active_repo != pandas_repo_id:
-        print(f"\n✗ Active repo mismatch: expected {pandas_repo_id}, got {active_repo}")
+    if active_repo != requests_repo_id:
+        print(f"\n✗ Active repo mismatch: expected {requests_repo_id}, got {active_repo}")
         return
     
-    # Query pandas
-    if not test_query_pandas():
+    # Query requests
+    if not test_query_requests():
         print("\n✗ Query test failed")
         return
     
     print("\n" + "=" * 60)
     print("✓ All tests passed!")
     print("=" * 60)
-    print(f"\nPandas repository successfully ingested and queryable!")
-    print(f"Initial repo: {initial_repo}")
-    print(f"Pandas repo: {pandas_repo_id}")
+    print(f"\nRequests repository successfully ingested and queryable!")
 
 
 if __name__ == "__main__":
-    import sys
-    
-    print("\n" + "!"*60)
-    print("WARNING: This will clone the entire pandas repository!")
-    print("This may take several minutes and use significant disk space.")
-    print("!"*60)
-    
-    response = input("\nDo you want to continue? (yes/no): ")
-    if response.lower() != 'yes':
-        print("\nTest cancelled.")
-        sys.exit(0)
-    
     try:
         main()
+    except KeyboardInterrupt:
+        print("\nTest cancelled by user.")
+        sys.exit(1)
     except Exception as e:
         print(f"\n✗ Test failed with error: {e}")
         import traceback

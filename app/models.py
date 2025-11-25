@@ -192,6 +192,7 @@ class RepositoryInfo(BaseModel):
     local_path: str
     dependencies: List[str]
     file_count: int
+    status: str = Field(default="completed", description="Ingestion status: pending, ingesting, completed, failed")
 
 
 class SetActiveRepositoryRequest(BaseModel):
@@ -199,7 +200,13 @@ class SetActiveRepositoryRequest(BaseModel):
     repo_id: str
 
 
+class RepositorySummary(BaseModel):
+    """Summary of a repository"""
+    repo_id: str
+    path: str
+
+
 class ListRepositoriesResponse(BaseModel):
     """Response listing all ingested repositories"""
-    repositories: List[RepositoryInfo]
-    active_repo_id: Optional[str] = None
+    repositories: List[RepositorySummary]
+    count: int

@@ -15,7 +15,10 @@ from .database import get_collection, get_collection_name, delete_file_chunks
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = ".ingest_cache"
-IGNORE_DIRS = {'.git', '__pycache__', '.venv', 'venv', 'node_modules', '.idea', '.vscode', 'data'}
+IGNORE_DIRS = {
+    '.git', '__pycache__', '.venv', 'venv', 'node_modules', '.idea', '.vscode', 'data',
+    'tests', 'test', 'docs', 'doc', 'benchmarks', 'examples', 'samples', 'build', 'dist', 'site-packages', 'repos'
+}
 EXTENSIONS = {'.py', '.md'}
 
 class IngestManager:
@@ -49,11 +52,12 @@ class IngestManager:
         """
         Synchronize the repository with the vector database.
         Only processes files that have changed since the last sync.
+        Uses batch processing for better performance.
         """
         logger.info("Starting smart ingestion sync...")
-        changes_detected = 0
         
-        # 1. Walk repo and identify changes
+        # 1. Identify files to process
+        files_to_process = []
         current_files: Set[str] = set()
         
         for root, dirs, files in os.walk(self.repo_path):
@@ -77,23 +81,16 @@ class IngestManager:
                     
                     # Check if new or modified
                     if rel_path not in self.cache or self.cache[rel_path] < mtime:
-                        logger.info(f"Syncing file: {rel_path}")
-                        await self._ingest_file(filepath, rel_path)
-                        self.cache[rel_path] = mtime
-                        changes_detected += 1
+                        files_to_process.append((filepath, rel_path, mtime))
                         
                 except Exception as e:
                     logger.error(f"Error checking file {rel_path}: {e}")
 
-        # 2. Handle deletions (files in cache but not on disk)
-        # Note: For simplicity, we won't actively delete from DB here to avoid complex logic,
-        # but we will remove them from cache. A full reset/re-ingest handles cleanups.
-        # Ideally, we should delete chunks for missing files too.
-        
+        # 2. Handle deletions
+        changes_detected = 0
         for cached_file in list(self.cache.keys()):
             if cached_file not in current_files:
                 logger.info(f"File removed: {cached_file}")
-                # Optional: delete from DB
                 try:
                     delete_file_chunks(cached_file)
                 except Exception as e:
@@ -101,29 +98,92 @@ class IngestManager:
                 del self.cache[cached_file]
                 changes_detected += 1
 
+        # 3. Process updates in batches
+        if files_to_process:
+            logger.info(f"Found {len(files_to_process)} files to ingest.")
+            
+            BATCH_SIZE = 20  # Number of files to process concurrently
+            
+            for i in range(0, len(files_to_process), BATCH_SIZE):
+                batch = files_to_process[i:i + BATCH_SIZE]
+                logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(len(files_to_process) + BATCH_SIZE - 1)//BATCH_SIZE} ({len(batch)} files)")
+                
+                # Process batch concurrently
+                tasks = [self._process_file(fp, rp) for fp, rp, _ in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Collect valid chunks
+                all_ids = []
+                all_docs = []
+                all_metas = []
+                processed_files = []
+                
+                for j, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Failed to process {batch[j][1]}: {result}")
+                        continue
+                        
+                    if result:
+                        ids, docs, metas = result
+                        if ids:
+                            all_ids.extend(ids)
+                            all_docs.extend(docs)
+                            all_metas.extend(metas)
+                        processed_files.append(batch[j])
+
+                # Batch insert to ChromaDB
+                if all_ids:
+                    try:
+                        collection = get_collection()
+                        # ChromaDB recommends batches < 40k tokens. 
+                        # We might need to sub-batch if really huge, but 20 files should be safe.
+                        collection.add(
+                            ids=all_ids,
+                            documents=all_docs,
+                            metadatas=all_metas
+                        )
+                        changes_detected += len(processed_files)
+                        
+                        # Update cache only after successful insertion
+                        for _, rp, mtime in processed_files:
+                            self.cache[rp] = mtime
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to insert batch to ChromaDB: {e}")
+                else:
+                    # Even if no chunks (empty files), update cache
+                    for _, rp, mtime in processed_files:
+                        self.cache[rp] = mtime
+                        changes_detected += 1
+
         if changes_detected > 0:
             self._save_cache()
             logger.info(f"Smart ingestion complete. {changes_detected} files updated.")
         else:
             logger.debug("No changes detected.")
 
-    async def _ingest_file(self, filepath: str, rel_path: str):
-        """Ingest a single file."""
+    async def _process_file(self, filepath: str, rel_path: str):
+        """
+        Read and chunk a single file. 
+        Returns (ids, documents, metadatas) or None.
+        """
         try:
+            # Run file I/O in thread pool to avoid blocking event loop
+            loop = asyncio.get_event_loop()
             with open(filepath, 'r', encoding='utf-8') as f:
-                code = f.read()
+                code = await loop.run_in_executor(None, f.read)
             
-            # 1. Delete old chunks
+            # Delete old chunks first
+            # Note: This is still synchronous and individual. 
+            # Optimization: Could batch delete, but delete_file_chunks takes one file.
+            # For now, keep it simple.
             delete_file_chunks(rel_path)
             
-            # 2. Chunk and add new
+            # Chunking (CPU bound)
             if rel_path.endswith('.py'):
-                chunks = chunk_python_code(code, rel_path, self.repo_name)
+                # Run CPU-bound chunking in executor
+                chunks = await loop.run_in_executor(None, chunk_python_code, code, rel_path, self.repo_name)
             else:
-                # Simple chunking for non-python files (e.g. Markdown)
-                # Treat the whole file as one chunk for now, or split by paragraphs if needed.
-                # For simplicity, we'll just index the whole file content if it's not too huge.
-                # Ideally we should split by headers for MD.
                 chunks = [{
                     "id": f"{rel_path}::text::0",
                     "content": code,
@@ -139,11 +199,12 @@ class IngestManager:
                 }]
             
             if not chunks:
-                return
+                return [], [], []
 
             ids = [chunk["id"] for chunk in chunks]
             documents = [chunk["content"] for chunk in chunks]
             metadatas = []
+            
             for chunk in chunks:
                 filtered_metadata = {}
                 for key, value in chunk["metadata"].items():
@@ -152,16 +213,12 @@ class IngestManager:
                 # Ensure repo_id is always present
                 filtered_metadata["repo_id"] = self.repo_id
                 metadatas.append(filtered_metadata)
-            
-            collection = get_collection()
-            collection.add(
-                ids=ids,
-                documents=documents,
-                metadatas=metadatas
-            )
+                
+            return ids, documents, metadatas
             
         except Exception as e:
-            logger.error(f"Failed to ingest {rel_path}: {e}")
+            logger.error(f"Error processing {rel_path}: {e}")
+            raise e
 
 # Global instance for the default (local) repository
 ingest_manager = IngestManager(repo_path=".", repo_id="default", repo_name="Untango")

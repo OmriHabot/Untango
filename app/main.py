@@ -3,7 +3,7 @@ FastAPI application for RAG backend with ChromaDB and Vertex AI.
 """
 import logging
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 
 from .models import (
@@ -528,7 +528,21 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
     # Trigger smart ingestion (background sync)
     # We await it to ensure consistency for the current query
     try:
-        await ingest_manager.sync_repo()
+        active_repo_id = active_repo_state.get_active_repo_id()
+        if active_repo_id and active_repo_id != "default":
+            # Get repo context to find path
+            repo_path = os.path.join(repo_manager.repos_base_path, active_repo_id)
+            # Create specific ingest manager
+            # Note: In a real app we might want to cache these managers
+            current_ingest_manager = IngestManager(
+                repo_path=repo_path,
+                repo_id=active_repo_id,
+                repo_name=active_repo_id  # We could lookup name but ID is sufficient for logging
+            )
+            await current_ingest_manager.sync_repo()
+        else:
+            # Fallback to default
+            await ingest_manager.sync_repo()
     except Exception as e:
         logger.error(f"Smart ingestion failed: {e}")
         
@@ -545,7 +559,17 @@ async def chat_stream_endpoint(request: ChatRequest):
     
     # Trigger smart ingestion (background sync)
     try:
-        await ingest_manager.sync_repo()
+        active_repo_id = active_repo_state.get_active_repo_id()
+        if active_repo_id and active_repo_id != "default":
+            repo_path = os.path.join(repo_manager.repos_base_path, active_repo_id)
+            current_ingest_manager = IngestManager(
+                repo_path=repo_path,
+                repo_id=active_repo_id,
+                repo_name=active_repo_id
+            )
+            await current_ingest_manager.sync_repo()
+        else:
+            await ingest_manager.sync_repo()
     except Exception as e:
         logger.error(f"Smart ingestion failed: {e}")
         
@@ -555,11 +579,33 @@ async def chat_stream_endpoint(request: ChatRequest):
         )
 
 
+async def ingest_repo_background(repo_context: RepositoryContext, repo_ingest_manager: IngestManager):
+    """Background task for repository ingestion."""
+    try:
+        active_repo_state.set_ingestion_status(repo_context.repo_id, "ingesting")
+        logger.info(f"Starting background ingestion for {repo_context.repo_id}")
+        
+        await repo_ingest_manager.sync_repo()
+        
+        active_repo_state.set_ingestion_status(repo_context.repo_id, "completed")
+        logger.info(f"Background ingestion completed for {repo_context.repo_id}")
+        
+        # Set as active repository automatically upon completion
+        active_repo_state.set_active_repo_id(repo_context.repo_id)
+        
+    except Exception as e:
+        logger.exception(f"Background ingestion failed for {repo_context.repo_id}")
+        active_repo_state.set_ingestion_status(repo_context.repo_id, "failed")
+
+
 @app.post("/ingest-repository", response_model=RepositoryInfo)
-async def ingest_repository_endpoint(request: IngestRepositoryRequest) -> RepositoryInfo:
+async def ingest_repository_endpoint(
+    request: IngestRepositoryRequest, 
+    background_tasks: BackgroundTasks
+) -> RepositoryInfo:
     """
     Ingest a repository from GitHub or local filesystem.
-    Creates a repository context, clones if needed, and ingests all files.
+    Starts ingestion in the background and returns 'pending' status.
     """
     logger.info(f"Ingesting repository: {request.source.type} - {request.source.location}")
     
@@ -581,14 +627,14 @@ async def ingest_repository_endpoint(request: IngestRepositoryRequest) -> Reposi
             repo_name=repo_context.repo_name
         )
         
-        # Sync the repository
-        await repo_ingest_manager.sync_repo()
+        # Set initial status
+        active_repo_state.set_ingestion_status(repo_context.repo_id, "pending")
         
-        # Count files (approximate from cache)
+        # Start background task
+        background_tasks.add_task(ingest_repo_background, repo_context, repo_ingest_manager)
+        
+        # Count files (approximate from cache, likely 0 initially)
         file_count = len(repo_ingest_manager.cache)
-        
-        # Set as active repository
-        active_repo_state.set_active_repo_id(repo_context.repo_id)
         
         return RepositoryInfo(
             repo_id=repo_context.repo_id,
@@ -597,11 +643,22 @@ async def ingest_repository_endpoint(request: IngestRepositoryRequest) -> Reposi
             source_location=repo_context.source_location,
             local_path=repo_context.repo_path,
             dependencies=repo_context.dependencies,
-            file_count=file_count
+            file_count=file_count,
+            status="pending"
         )
     except Exception as e:
         logger.exception("Repository ingestion failed")
         raise HTTPException(status_code=500, detail=f"Failed to ingest repository: {str(e)}")
+
+
+@app.get("/repository/{repo_id}/status")
+async def get_repository_status_endpoint(repo_id: str) -> dict:
+    """Get the ingestion status of a repository."""
+    status = active_repo_state.get_ingestion_status(repo_id)
+    return {
+        "repo_id": repo_id,
+        "status": status
+    }
 
 
 @app.post("/set-active-repository")
@@ -628,6 +685,18 @@ async def get_active_repository_endpoint() -> dict:
     return {
         "active_repo_id": repo_id
     }
+
+
+@app.get("/list-repositories", response_model=ListRepositoriesResponse)
+async def list_repositories_endpoint() -> ListRepositoriesResponse:
+    """
+    List all available repositories.
+    """
+    repos = repo_manager.list_repositories()
+    return ListRepositoriesResponse(
+        repositories=repos,
+        count=len(repos)
+    )
 
 
 if __name__ == "__main__":

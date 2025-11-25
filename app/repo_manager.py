@@ -199,6 +199,24 @@ class RepositoryManager:
             source_location=source_location,
             dependencies=dependencies
         )
+    
+    def list_repositories(self) -> List[dict]:
+        """List all available repositories."""
+        repos = []
+        if not os.path.exists(self.repos_base_path):
+            return repos
+            
+        for repo_id in os.listdir(self.repos_base_path):
+            repo_path = os.path.join(self.repos_base_path, repo_id)
+            if os.path.isdir(repo_path):
+                # Try to determine name (fallback to ID)
+                # In a real app, we'd persist metadata properly.
+                # For now, we'll just return what we have.
+                repos.append({
+                    "repo_id": repo_id,
+                    "path": repo_path
+                })
+        return repos
 
 
 # Global instance
