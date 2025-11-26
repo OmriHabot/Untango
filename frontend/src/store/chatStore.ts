@@ -22,18 +22,53 @@ export interface Message extends ChatMessage {
 interface ChatState {
   messages: Message[];
   isStreaming: boolean;
-  currentTool: ToolCall | null;
+  isLoading: boolean; // Added
+  currentToolCall: ToolCall | null; // Renamed from currentTool
   
   addMessage: (message: Message) => void;
   updateLastMessage: (content: string) => void;
-  sendMessage: (content: string, model?: string) => Promise<void>;
-  clearChat: () => void;
+  sendMessage: (content: string, model?: string) => Promise<void>; // Kept model optional for implementation
+  clearMessages: () => Promise<void>; // Renamed from clearChat, now async
+  loadHistory: () => Promise<void>; // Added
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isStreaming: false,
-  currentTool: null,
+  isLoading: false, // Added
+  currentToolCall: null, // Renamed from currentTool
+
+  loadHistory: async () => {
+    set({ isLoading: true });
+    try {
+      const { history } = await api.getChatHistory();
+      // Map backend history to frontend message format
+      // Note: Backend history doesn't store tool calls yet, just text
+      const formattedMessages: Message[] = history.map((msg: any) => ({
+        role: msg.role,
+        content: msg.content,
+        id: Math.random().toString(36).substring(7), // Generate temp ID
+        timestamp: Date.now()
+      }));
+      set({ messages: formattedMessages });
+    } catch (error) {
+      console.error('Failed to load history:', error);
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  clearMessages: async () => { // Renamed from clearChat
+    set({ isLoading: true });
+    try {
+      await api.clearChatHistory();
+      set({ messages: [], currentToolCall: null });
+    } catch (error) {
+      console.error('Failed to clear history:', error);
+    } finally {
+      set({ isLoading: false });
+    }
+  },
 
   addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
   
@@ -120,28 +155,55 @@ export const useChatStore = create<ChatState>((set, get) => ({
               set((state) => {
                 const msgs = [...state.messages];
                 const last = msgs[msgs.length - 1];
-                if (!last.toolCalls) last.toolCalls = [];
+                // Create a new array for toolCalls to ensure immutability
+                const newToolCalls = [...(last.toolCalls || [])];
                 
                 const newTool: ToolCall = {
                   tool: event.tool,
                   args: event.args,
                   status: 'running'
                 };
-                last.toolCalls.push(newTool);
-                return { messages: msgs, currentTool: newTool };
+                newToolCalls.push(newTool);
+                
+                // Update the message with new toolCalls
+                const newLast = { ...last, toolCalls: newToolCalls };
+                msgs[msgs.length - 1] = newLast;
+
+                return { 
+                  messages: msgs, 
+                  currentToolCall: newTool
+                };
               });
             } else if (event.type === 'tool_end') {
               set((state) => {
                 const msgs = [...state.messages];
                 const last = msgs[msgs.length - 1];
+                
                 if (last.toolCalls) {
-                  const toolIndex = last.toolCalls.findIndex(t => t.tool === event.tool && t.status === 'running');
-                  if (toolIndex !== -1) {
-                    last.toolCalls[toolIndex].result = event.result;
-                    last.toolCalls[toolIndex].status = 'completed';
-                  }
+                    const newToolCalls = [...last.toolCalls];
+                    // Find the running tool call matching this tool
+                    // We search from the end to find the most recent one
+                    let toolIndex = -1;
+                    for (let i = newToolCalls.length - 1; i >= 0; i--) {
+                        if (newToolCalls[i].tool === event.tool && newToolCalls[i].status === 'running') {
+                            toolIndex = i;
+                            break;
+                        }
+                    }
+                    
+                    if (toolIndex !== -1) {
+                        newToolCalls[toolIndex] = {
+                            ...newToolCalls[toolIndex],
+                            result: event.result,
+                            status: 'completed'
+                        };
+                        
+                        const newLast = { ...last, toolCalls: newToolCalls };
+                        msgs[msgs.length - 1] = newLast;
+                        return { messages: msgs, currentToolCall: null };
+                    }
                 }
-                return { messages: msgs, currentTool: null };
+                return {};
               });
             } else if (event.type === 'usage') {
               set((state) => {

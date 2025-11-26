@@ -73,4 +73,14 @@ export const api = {
     });
     return response.data;
   },
+
+  getChatHistory: async () => {
+    const response = await client.get(`${API_URL}/chat/history`);
+    return response.data;
+  },
+
+  clearChatHistory: async () => {
+    const response = await client.delete(`${API_URL}/chat/history`);
+    return response.data;
+  }
 };

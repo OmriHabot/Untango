@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, BookOpen, Loader2, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { api } from '../api/client';
 import { useRepoStore } from '../store/repoStore';
 
@@ -77,8 +79,36 @@ export const RunbookModal: React.FC<Props> = ({ onClose }) => {
               <p className="text-xs">This may take a minute.</p>
             </div>
           ) : runbook ? (
-            <div className="prose prose-invert max-w-none">
-              <ReactMarkdown>{runbook}</ReactMarkdown>
+            <div className="prose prose-invert prose-sm max-w-none">
+              <ReactMarkdown
+                components={{
+                  code({ node, inline, className, children, ...props }: any) {
+                    const match = /language-(\w+)/.exec(className || '');
+                    return !inline && match ? (
+                      <div className="rounded-md overflow-hidden my-2 border border-slate-700">
+                        <div className="bg-slate-900 px-4 py-1 text-xs text-slate-400 border-b border-slate-700 flex justify-between items-center">
+                          <span>{match[1]}</span>
+                        </div>
+                        <SyntaxHighlighter
+                          style={vscDarkPlus}
+                          language={match[1]}
+                          PreTag="div"
+                          customStyle={{ margin: 0, borderRadius: 0, background: '#0f172a' }}
+                          {...props}
+                        >
+                          {String(children).replace(/\n$/, '')}
+                        </SyntaxHighlighter>
+                      </div>
+                    ) : (
+                      <code className="bg-slate-800 px-1 py-0.5 rounded text-purple-300 font-mono text-sm" {...props}>
+                        {children}
+                      </code>
+                    );
+                  }
+                }}
+              >
+                {runbook}
+              </ReactMarkdown>
             </div>
           ) : (
             <div className="text-center text-slate-500">

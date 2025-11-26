@@ -1,17 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { useRepoStore } from '../store/repoStore';
+import { useChatStore } from '../store/chatStore';
 import { Plus, Database, Loader2, CheckCircle, XCircle, GitBranch } from 'lucide-react';
 import clsx from 'clsx';
 import { IngestModal } from './IngestModal';
 
 export const Sidebar: React.FC = () => {
   const { repositories, activeRepoId, fetchRepositories, setActiveRepo, checkActiveRepo, ingestionStatuses } = useRepoStore();
+  const { messages, sendMessage, isLoading: isChatLoading, loadHistory } = useChatStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const pollStatus = () => {
+    checkActiveRepo();
+  };
 
   useEffect(() => {
     fetchRepositories();
-    checkActiveRepo();
+    const interval = setInterval(pollStatus, 5000);
+    return () => clearInterval(interval);
   }, []);
+
+  // Load chat history when active repo changes
+  useEffect(() => {
+    if (activeRepoId && activeRepoId !== 'default') {
+      loadHistory();
+    }
+  }, [activeRepoId]);
 
   return (
     <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col h-screen text-slate-300">

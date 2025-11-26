@@ -43,6 +43,7 @@ from .search import perform_hybrid_search
 from .logger import setup_logging, get_logger
 from .orchestrator import generate_runbook_orchestrator
 from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
+from .chat_history import chat_history_manager
 
 
 LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
@@ -556,7 +557,19 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
     except Exception as e:
         logger.error(f"Smart ingestion failed: {e}")
         
-    return await chat_with_agent(request)
+    # Save user message
+    if request.messages:
+        active_repo_id = active_repo_state.get_active_repo_id()
+        if active_repo_id and active_repo_id != "default":
+            chat_history_manager.add_message(active_repo_id, request.messages[-1])
+
+    response = await chat_with_agent(request)
+    
+    # Save assistant response
+    if active_repo_id and active_repo_id != "default":
+        chat_history_manager.add_message(active_repo_id, Message(role="assistant", content=response.response))
+        
+    return response
 
 
 @app.post("/chat-stream")
@@ -583,8 +596,41 @@ async def chat_stream_endpoint(request: ChatRequest):
     except Exception as e:
         logger.error(f"Smart ingestion failed: {e}")
         
+    # Save user message
+    if request.messages:
+        active_repo_id = active_repo_state.get_active_repo_id()
+        if active_repo_id and active_repo_id != "default":
+            chat_history_manager.add_message(active_repo_id, request.messages[-1])
+
+    async def stream_wrapper():
+        full_response = ""
+        async for chunk in chat_with_agent_stream(request):
+            # Capture content for history
+            try:
+                # Chunk might be multiple lines or raw NDJSON
+                lines = chunk.strip().split('\n')
+                for line in lines:
+                    if not line: continue
+                    # Handle both SSE (data: ...) and raw NDJSON
+                    if line.startswith("data: "):
+                        line = line[6:]
+                    
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "token":
+                            full_response += data.get("content", "")
+                    except json.JSONDecodeError:
+                        pass
+            except Exception:
+                pass
+            yield chunk
+            
+        # Save full assistant response
+        if active_repo_id and active_repo_id != "default" and full_response:
+             chat_history_manager.add_message(active_repo_id, Message(role="assistant", content=full_response))
+
     return StreamingResponse(
-            chat_with_agent_stream(request),
+            stream_wrapper(),
             media_type="application/x-ndjson"
         )
 
@@ -707,6 +753,25 @@ async def list_repositories_endpoint() -> ListRepositoriesResponse:
         repositories=repos,
         count=len(repos)
     )
+
+@app.get("/chat/history")
+async def get_chat_history():
+    """Get chat history for the active repository."""
+    active_repo_id = active_repo_state.get_active_repo_id()
+    if not active_repo_id or active_repo_id == "default":
+        return {"history": []}
+    
+    history = chat_history_manager.get_history(active_repo_id)
+    return {"history": history}
+
+
+@app.delete("/chat/history")
+async def clear_chat_history():
+    """Clear chat history for the active repository."""
+    active_repo_id = active_repo_state.get_active_repo_id()
+    if active_repo_id and active_repo_id != "default":
+        chat_history_manager.clear_history(active_repo_id)
+    return {"status": "success"}
 
 
 if __name__ == "__main__":

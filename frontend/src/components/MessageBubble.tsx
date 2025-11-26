@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Message, ToolCall } from '../store/chatStore';
 import { User, Bot, Terminal, ChevronDown, ChevronRight, Check, X } from 'lucide-react';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import clsx from 'clsx';
 
 interface Props {
@@ -83,19 +85,23 @@ export const MessageBubble: React.FC<Props> = ({ message }) => {
               components={{
                 code({ node, inline, className, children, ...props }: any) {
                   const match = /language-(\w+)/.exec(className || '');
-                  return !inline ? (
-                    <div className="relative group">
-                      <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span className="text-xs text-slate-400">{match?.[1] || 'text'}</span>
+                  return !inline && match ? (
+                    <div className="rounded-md overflow-hidden my-2 border border-slate-700">
+                      <div className="bg-slate-900 px-4 py-1 text-xs text-slate-400 border-b border-slate-700 flex justify-between items-center">
+                        <span>{match[1]}</span>
                       </div>
-                      <pre className="bg-slate-950 p-4 rounded-md overflow-x-auto border border-slate-800 my-2">
-                        <code className={className} {...props}>
-                          {children}
-                        </code>
-                      </pre>
+                      <SyntaxHighlighter
+                        style={vscDarkPlus}
+                        language={match[1]}
+                        PreTag="div"
+                        customStyle={{ margin: 0, borderRadius: 0, background: '#0f172a' }}
+                        {...props}
+                      >
+                        {String(children).replace(/\n$/, '')}
+                      </SyntaxHighlighter>
                     </div>
                   ) : (
-                    <code className="bg-slate-800 px-1 py-0.5 rounded text-purple-300" {...props}>
+                    <code className="bg-slate-800 px-1 py-0.5 rounded text-purple-300 font-mono text-sm" {...props}>
                       {children}
                     </code>
                   );
