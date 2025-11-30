@@ -68,6 +68,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Added for the new endpoint
+@app.post("/api/select-repo")
+async def select_repo(request: SetActiveRepositoryRequest):
+    """Select a repository to be active."""
+    try:
+        # Verify repo exists
+        repos = repo_manager.list_repositories()
+        repo = next((r for r in repos if r['repo_id'] == request.repo_id), None)
+        
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found")
+            
+        # Set active repo
+        active_repo_state.set_active_repo(request.repo_id)
+        
+        # Initialize Context Manager for this repo
+        # We run this in background or await it? It's fast enough to await usually.
+        # But scanning env might take a second. Let's await it for now to ensure context is ready.
+        context_manager.initialize_context(repo['path'], repo['name'])
+        
+        return {"status": "success", "message": f"Selected repo: {repo['name']}"}
+    except Exception as e:
+        logger.error(f"Error selecting repo: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ingest")
 async def ingest_code(request: CodeIngestRequest):

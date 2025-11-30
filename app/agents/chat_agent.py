@@ -132,6 +132,8 @@ rag_tool = types.Tool(
     ]
 )
 
+from ..context_manager import context_manager
+
 async def chat_with_agent(request: ChatRequest) -> ChatResponse:
     """
     Process a chat request using Vertex AI with tools.
@@ -160,24 +162,37 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
             role = "user" if msg.role == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part(text=msg.content)]))
 
+        # Get Automated Context Report
+        context_report = context_manager.get_context_report()
+        context_str = context_report.to_string() if context_report else "Context not initialized yet."
+
         # Configuration
         config = types.GenerateContentConfig(
             tools=[rag_tool],
             temperature=0.0, # Low temp for tool use
-            system_instruction="""You are an expert coding assistant for the 'Untango' repository. 
+            system_instruction=f"""You are an expert coding assistant for the 'Untango' repository. 
+
+=== AUTOMATED CONTEXT ===
+{context_str}
+=========================
 
 IMPORTANT: You have access to powerful tools and you MUST use them proactively:
 - rag_search: Search the codebase semantically for code logic, functions, and classes
 - list_files: Explore the repository structure
 - read_file: Read file contents directly
 - list_package_files: Inspect installed dependencies
+- scan_environment: Get OS, Python version, GPU status, and installed packages
+- map_repo: Get a structural map of the repository (entry points, dependencies)
+- analyze_notebook: Extract imports and versions from a .ipynb file
 
 When the user asks a question:
 1. ALWAYS use your tools FIRST to find the answer in the codebase
 2. DO NOT ask the user for information that you can find using your tools
 3. Use rag_search to find relevant code snippets and documentation
 4. Use list_files and read_file to explore the repository structure
-5. Only ask the user for clarification if the question itself is ambiguous
+5. Use scan_environment if the user asks about the system or environment
+6. Use analyze_notebook if the user asks about dependencies in a notebook
+7. Only ask the user for clarification if the question itself is ambiguous
 
 CRITICAL - SELF-VALIDATION PROCESS:
 Before providing your final answer, ask yourself:
@@ -199,6 +214,7 @@ When looking for specific information, think about WHERE it would logically be:
 - **Business logic**: Use rag_search for semantic search, or read specific modules
 - **Dependencies**: Read requirements.txt or use list_package_files
 - **Environment variables**: Look for os.getenv() calls or .env files
+- **Notebook Dependencies**: Use analyze_notebook on the specific .ipynb file
 
 Use read_file to inspect actual source code rather than relying only on rag_search.
 Prefer reading entry point files (main.py, __init__.py) completely to understand structure.
