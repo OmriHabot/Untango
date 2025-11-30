@@ -40,6 +40,7 @@ class ContextReport:
         # Repo Section
         report.append("\n[Repository]")
         report.append(f"Name: {self.repo_map.repo_name}")
+        report.append(f"Last Updated: {self.repo_map.last_updated}")
         report.append(f"Entry Points: {', '.join(self.repo_map.entry_points[:5])}" + 
                      (f" (+{len(self.repo_map.entry_points)-5} more)" if len(self.repo_map.entry_points) > 5 else ""))
         

@@ -216,6 +216,13 @@ When looking for specific information, think about WHERE it would logically be:
 - **Environment variables**: Look for os.getenv() calls or .env files
 - **Notebook Dependencies**: Use analyze_notebook on the specific .ipynb file
 
+VERSION INFERENCE (CRITICAL):
+If the "Automated Context" shows dependencies without versions (e.g. just "pandas"), you MUST:
+1. Check the "Last Updated" date in the [Repository] section.
+2. Infer the likely version based on that date (e.g., Repo from 2021 likely uses pandas 1.x).
+3. Compare this with the user's installed version.
+4. WARN the user if there is a significant time gap (e.g., "Repo is from 2021 but you have pandas 2.2 installed. This may cause breaking changes.").
+
 Use read_file to inspect actual source code rather than relying only on rag_search.
 Prefer reading entry point files (main.py, __init__.py) completely to understand structure.
 

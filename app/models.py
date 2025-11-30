@@ -135,6 +135,7 @@ class RepoMap(BaseModel):
     structure: Dict[str, Any]
     entry_points: List[str]
     dependencies: List[str]
+    last_updated: Optional[str] = None
 
 
 class RunbookRequest(BaseModel):
