@@ -68,6 +68,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Added for the new endpoint
+async def run_background_ingest(repo_path: str, repo_id: str, repo_name: str):
+    """Helper for background ingestion."""
+    try:
+        logger.info(f"Starting background ingestion for {repo_name}")
+        manager = IngestManager(repo_path=repo_path, repo_id=repo_id, repo_name=repo_name)
+        await manager.sync_repo()
+        logger.info(f"Background ingestion finished for {repo_name}")
+    except Exception as e:
+        logger.error(f"Background ingestion failed for {repo_name}: {e}")
+
+@app.post("/api/select-repo")
+async def select_repo(request: SetActiveRepositoryRequest, background_tasks: BackgroundTasks):
+    """Select a repository to be active."""
+    try:
+        # Verify repo exists
+        repos = repo_manager.list_repositories()
+        repo = next((r for r in repos if r['repo_id'] == request.repo_id), None)
+        
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found")
+            
+        # Set active repo
+        active_repo_state.set_active_repo(request.repo_id)
+        
+        # Initialize Context Manager for this repo
+        context_manager.initialize_context(repo['path'], repo['name'])
+        
+        # Trigger RAG Ingestion in Background
+        background_tasks.add_task(run_background_ingest, repo['path'], request.repo_id, repo['name'])
+        
+        return {"status": "success", "message": f"Selected repo: {repo['name']}"}
+    except Exception as e:
+        logger.error(f"Error selecting repo: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ingest")
 async def ingest_code(request: CodeIngestRequest):

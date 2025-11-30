@@ -17,7 +17,8 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 # Docker volume mount point for repositories
-REPOS_BASE_PATH = "/app/repos"
+# Docker volume mount point for repositories (or local cache)
+REPOS_BASE_PATH = os.path.join(os.getcwd(), ".repos")
 
 
 @dataclass
