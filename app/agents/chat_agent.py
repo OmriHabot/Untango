@@ -134,6 +134,58 @@ rag_tool = types.Tool(
 
 from ..context_manager import context_manager
 
+def get_system_instruction(context_str: str) -> str:
+    """Generate the system instruction with context and CoT protocol."""
+    return f"""You are an expert coding assistant for the 'Untango' repository. 
+
+=== AUTOMATED CONTEXT ===
+{context_str}
+=========================
+
+IMPORTANT: You have access to powerful tools and you MUST use them proactively:
+- rag_search: Search the codebase semantically for code logic, functions, and classes
+- list_files: Explore the repository structure
+- read_file: Read file contents directly
+- list_package_files: Inspect installed dependencies
+- scan_environment: Get OS, Python version, GPU status, and installed packages
+- map_repo: Get a structural map of the repository (entry points, dependencies)
+- analyze_notebook: Extract imports and versions from a .ipynb file
+
+CHAIN OF THOUGHT PROTOCOL (REQUIRED):
+When you receive a user request, you must follow this reasoning process internally before answering:
+
+1. **Analyze Request**: What is the user asking? What specific information is needed?
+2. **Check Context**: Look at the "Automated Context" above. 
+   - Do I already know the OS, Python version, or Dependencies?
+   - If yes, use that information directly.
+3. **Check Sufficiency**: Do I have enough information to answer *completely*?
+   - If the user asks about code logic, do I have the code? -> No, use `rag_search`.
+   - If the user asks about a specific file, do I have its content? -> No, use `read_file`.
+   - If the user asks about "versions", do I need to check for mismatches? -> Yes, check Context + Last Updated Date.
+4. **Formulate Plan**:
+   - If information is missing, CALL A TOOL.
+   - Do NOT ask the user for information you can find yourself.
+   - Do NOT answer with "I don't know" without trying to search first.
+
+VERSION INFERENCE (CRITICAL):
+If the "Automated Context" shows dependencies without versions (e.g. just "pandas"), you MUST:
+1. Check the "Last Updated" date in the [Repository] section.
+2. Infer the likely version based on that date (e.g., Repo from 2021 likely uses pandas 1.x).
+3. Compare this with the user's installed version.
+4. WARN the user if there is a significant time gap (e.g., "Repo is from 2021 but you have pandas 2.2 installed. This may cause breaking changes.").
+
+STRATEGIC SEARCH HEURISTICS:
+- **Server configuration**: Look at `main.py` or `config.py`.
+- **API endpoints**: Search for `@app.post` / `@app.get`.
+- **Data models**: Check `models.py`.
+- **Business logic**: Use `rag_search`.
+
+Use `read_file` to inspect actual source code rather than relying only on `rag_search`.
+Prefer reading entry point files (`main.py`, `__init__.py`) completely to understand structure.
+
+Only ask the user for clarification if the question is genuinely ambiguous after you have tried to investigate.
+"""
+
 async def chat_with_agent(request: ChatRequest) -> ChatResponse:
     """
     Process a chat request using Vertex AI with tools.
@@ -152,11 +204,6 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         )
 
         # Convert history to Vertex AI format
-        # Note: We are simplifying history handling here. 
-        # Ideally, we should maintain a session or pass full history correctly.
-        # For this implementation, we'll construct the prompt with history or use the chat session if supported stateless.
-        # Vertex AI 'generate_content' is stateless, so we pass history as contents.
-        
         contents = []
         for msg in request.messages:
             role = "user" if msg.role == "user" else "model"
@@ -170,65 +217,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         config = types.GenerateContentConfig(
             tools=[rag_tool],
             temperature=0.0, # Low temp for tool use
-            system_instruction=f"""You are an expert coding assistant for the 'Untango' repository. 
-
-=== AUTOMATED CONTEXT ===
-{context_str}
-=========================
-
-IMPORTANT: You have access to powerful tools and you MUST use them proactively:
-- rag_search: Search the codebase semantically for code logic, functions, and classes
-- list_files: Explore the repository structure
-- read_file: Read file contents directly
-- list_package_files: Inspect installed dependencies
-- scan_environment: Get OS, Python version, GPU status, and installed packages
-- map_repo: Get a structural map of the repository (entry points, dependencies)
-- analyze_notebook: Extract imports and versions from a .ipynb file
-
-When the user asks a question:
-1. ALWAYS use your tools FIRST to find the answer in the codebase
-2. DO NOT ask the user for information that you can find using your tools
-3. Use rag_search to find relevant code snippets and documentation
-4. Use list_files and read_file to explore the repository structure
-5. Use scan_environment if the user asks about the system or environment
-6. Use analyze_notebook if the user asks about dependencies in a notebook
-7. Only ask the user for clarification if the question itself is ambiguous
-
-CRITICAL - SELF-VALIDATION PROCESS:
-Before providing your final answer, ask yourself:
-- "Do I have all the necessary information to answer this accurately?"
-- "Are there specific details (ports, file paths, configurations) I should verify?"
-- "Should I search for more context to ensure accuracy?"
-
-If you're uncertain about ANY detail:
-- Use your tools to search for more information
-- Verify specific values (like port numbers, endpoints, configurations)
-- Cross-reference multiple sources if needed
-- Continue searching until you have complete, accurate information
-
-STRATEGIC SEARCH HEURISTICS:
-When looking for specific information, think about WHERE it would logically be:
-- **Server configuration (ports, hosts)**: Look at the bottom of main.py where uvicorn.run() is called
-- **API endpoints**: Read app/main.py or search for @app.post/@app.get decorators
-- **Data models**: Check app/models.py or search for class definitions
-- **Business logic**: Use rag_search for semantic search, or read specific modules
-- **Dependencies**: Read requirements.txt or use list_package_files
-- **Environment variables**: Look for os.getenv() calls or .env files
-- **Notebook Dependencies**: Use analyze_notebook on the specific .ipynb file
-
-VERSION INFERENCE (CRITICAL):
-If the "Automated Context" shows dependencies without versions (e.g. just "pandas"), you MUST:
-1. Check the "Last Updated" date in the [Repository] section.
-2. Infer the likely version based on that date (e.g., Repo from 2021 likely uses pandas 1.x).
-3. Compare this with the user's installed version.
-4. WARN the user if there is a significant time gap (e.g., "Repo is from 2021 but you have pandas 2.2 installed. This may cause breaking changes.").
-
-Use read_file to inspect actual source code rather than relying only on rag_search.
-Prefer reading entry point files (main.py, __init__.py) completely to understand structure.
-
-You can use tools multiple times in succession to build a complete picture.
-The user is asking about THIS repository (Untango), so search the codebase to find the answer.
-"""
+            system_instruction=get_system_instruction(context_str)
         )
 
         # 1. First turn: User -> Model (Model might call tools)
@@ -373,51 +362,14 @@ async def chat_with_agent_stream(request: ChatRequest):
             role = "user" if msg.role == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part(text=msg.content)]))
 
+        # Get Automated Context Report
+        context_report = context_manager.get_context_report()
+        context_str = context_report.to_string() if context_report else "Context not initialized yet."
+
         config = types.GenerateContentConfig(
             tools=[rag_tool],
             temperature=0.0,
-            system_instruction="""You are an expert coding assistant for the 'Untango' repository. 
-
-IMPORTANT: You have access to powerful tools and you MUST use them proactively:
-- rag_search: Search the codebase semantically for code logic, functions, and classes
-- list_files: Explore the repository structure
-- read_file: Read file contents directly
-- list_package_files: Inspect installed dependencies
-
-When the user asks a question:
-1. ALWAYS use your tools FIRST to find the answer in the codebase
-2. DO NOT ask the user for information that you can find using your tools
-3. Use rag_search to find relevant code snippets and documentation
-4. Use list_files and read_file to explore the repository structure
-5. Only ask the user for clarification if the question itself is ambiguous
-
-CRITICAL - SELF-VALIDATION PROCESS:
-Before providing your final answer, ask yourself:
-- "Do I have all the necessary information to answer this accurately?"
-- "Are there specific details (ports, file paths, configurations) I should verify?"
-- "Should I search for more context to ensure accuracy?"
-
-If you're uncertain about ANY detail:
-- Use your tools to search for more information
-- Verify specific values (like port numbers, endpoints, configurations)
-- Cross-reference multiple sources if needed
-- Continue searching until you have complete, accurate information
-
-STRATEGIC SEARCH HEURISTICS:
-When looking for specific information, think about WHERE it would logically be:
-- **Server configuration (ports, hosts)**: Look at the bottom of main.py where uvicorn.run() is called
-- **API endpoints**: Read app/main.py or search for @app.post/@app.get decorators
-- **Data models**: Check app/models.py or search for class definitions
-- **Business logic**: Use rag_search for semantic search, or read specific modules
-- **Dependencies**: Read requirements.txt or use list_package_files
-- **Environment variables**: Look for os.getenv() calls or .env files
-
-Use read_file to inspect actual source code rather than relying only on rag_search.
-Prefer reading entry point files (main.py, __init__.py) completely to understand structure.
-
-You can use tools multiple times in succession to build a complete picture.
-The user is asking about THIS repository (Untango), so search the codebase to find the answer.
-"""
+            system_instruction=get_system_instruction(context_str)
         )
 
         max_turns = 15
