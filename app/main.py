@@ -577,6 +577,7 @@ async def generate_runbook(request: RunbookRequest) -> RunbookResponse:
         runbook_content = await generate_runbook_content(
             repo_map=report.repo_map,
             env_info=report.env_info,
+            dependency_analysis=report.dependency_analysis,
             project_id=project_id,
             location=location
         )

@@ -15,19 +15,49 @@ import os
 
 logger = logging.getLogger(__name__)
 
+from typing import List
+from ..context_manager import DependencyStatus
+
 async def generate_runbook_content(
     repo_map: RepoMap, 
-    env_info: EnvInfo, 
+    env_info: EnvInfo,
+    dependency_analysis: List[DependencyStatus],
     project_id: str, 
     location: str,
     model: str = "gemini-2.0-flash-exp"
 ) -> str:
     """
-    Generate the runbook content using LLM.
+    Generate the runbook content using LLM with RAG and Dependency Analysis.
     """
     logger.info("Generating runbook content...")
     
-    # 1. Construct a context-rich prompt
+    # 1. Perform RAG Search for Context
+    # We search for setup instructions to give the LLM ground truth
+    search_queries = [
+        "how to install dependencies",
+        "how to run the application",
+        "setup instructions",
+        "deployment guide"
+    ]
+    
+    rag_context = []
+    for query in search_queries:
+        results = perform_hybrid_search(query, n_results=2, repo_id=None) # repo_id should be handled by context if possible, or passed
+        for r in results:
+            rag_context.append(f"Source: {r['metadata'].get('filepath')}\nContent:\n{r['content']}")
+            
+    rag_context_str = "\n---\n".join(rag_context[:5]) # Limit context size
+
+    # 2. Format Dependency Issues
+    dep_issues = [d for d in dependency_analysis if d.status != "OK"]
+    dep_issues_str = "None detected."
+    if dep_issues:
+        dep_issues_str = "\n".join([
+            f"- {d.package}: Status={d.status} (Required: {d.required_version}, Installed: {d.installed_version})"
+            for d in dep_issues
+        ])
+
+    # 3. Construct a context-rich prompt
     prompt = f"""
 You are an expert DevOps engineer and Technical Writer. Your task is to generate a "Quick Start / Runbook" for a developer who wants to run this repository.
 
@@ -35,29 +65,43 @@ CONTEXT:
 
 1. **Repository Structure**:
 {repo_map.structure}
+Last Updated: {repo_map.last_updated}
 
 2. **Detected Entry Points**:
 {repo_map.entry_points}
 
-3. **Dependencies**:
-{repo_map.dependencies}
+3. **Dependency Analysis (CRITICAL)**:
+The following issues were detected in the user's environment:
+{dep_issues_str}
 
-4. **Target Environment (User's Machine)**:
+4. **Retrieved Setup Instructions (RAG)**:
+Use these snippets as ground truth for commands if relevant:
+{rag_context_str}
+
+5. **Target Environment (User's Machine)**:
 - OS: {env_info.os_info}
 - Python: {env_info.python_version}
 - GPU/CUDA: {env_info.gpu_info} (Available: {env_info.cuda_available})
 
 TASK:
 Create a Markdown runbook (`RUNBOOK.md`) that explains:
-1. **Prerequisites**: What needs to be installed (based on dependencies and env).
-2. **Setup**: How to install dependencies (pip, conda, etc.).
-3. **Execution**: How to run the main entry points.
-4. **Troubleshooting**: Any potential issues based on the environment (e.g., if CUDA is missing but required).
+1. **Prerequisites**: 
+   - List required tools.
+   - **explicitly warn** about any "Dependency Analysis" issues listed above.
+   - **Time Rot Warning**: If the "Last Updated" date is old (e.g. > 1 year), warn the user that dependencies might be outdated or incompatible with modern Python versions.
+2. **Setup**: 
+   - How to install dependencies (pip, conda, etc.).
+   - Use the "Retrieved Setup Instructions" to find the correct commands (e.g. `pip install -r requirements.txt` vs `poetry install`).
+3. **Execution**: 
+   - How to run the main entry points.
+4. **Troubleshooting**: 
+   - Address the specific dependency mismatches found.
+   - Address environment limitations (e.g. if CUDA is missing).
 
 Keep it concise, actionable, and specific to the provided file structure.
 """
 
-    # 2. Call Vertex AI
+    # 4. Call Vertex AI
     try:
         client = genai.Client(
             vertexai=True,
