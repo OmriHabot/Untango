@@ -41,7 +41,6 @@ from .repo_manager import repo_manager, RepositoryContext
 from .active_repo_state import active_repo_state
 from .search import perform_hybrid_search
 from .logger import setup_logging, get_logger
-from .orchestrator import generate_runbook_orchestrator
 from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
 from .chat_history import chat_history_manager
 
@@ -553,6 +552,8 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
         )
 
 
+from .agents.runbook_generator import generate_runbook_content
+
 @app.post("/generate-runbook", response_model=RunbookResponse)
 async def generate_runbook(request: RunbookRequest) -> RunbookResponse:
     """
@@ -560,7 +561,35 @@ async def generate_runbook(request: RunbookRequest) -> RunbookResponse:
     Orchestrates environment scanning, repo mapping, and LLM generation.
     """
     logger.info("Runbook generation requested for repo '%s'", request.repo_name)
-    return await generate_runbook_orchestrator(request)
+    
+    try:
+        # 1. Get Context (Env + Repo)
+        # We use initialize_context to ensure it's fresh or loaded
+        report = context_manager.initialize_context(request.repo_path, request.repo_name)
+        
+        # 2. Generate Runbook
+        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        
+        if not project_id:
+             raise HTTPException(status_code=503, detail="GCP Project ID not configured")
+
+        runbook_content = await generate_runbook_content(
+            repo_map=report.repo_map,
+            env_info=report.env_info,
+            project_id=project_id,
+            location=location
+        )
+        
+        return RunbookResponse(
+            status="success",
+            runbook=runbook_content,
+            env_info=report.env_info,
+            repo_map=report.repo_map
+        )
+    except Exception as e:
+        logger.exception("Runbook generation failed")
+        raise HTTPException(status_code=500, detail=f"Runbook generation failed: {str(e)}")
 
 
 @app.post("/chat", response_model=ChatResponse)
