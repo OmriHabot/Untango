@@ -35,7 +35,44 @@ def calculate_cost(input_tokens: int, output_tokens: int) -> tuple[float, float,
     total_cost = input_cost + output_cost
     return input_cost, output_cost, total_cost
 
+from ..repo_manager import repo_manager
+
 # --- Tool Wrappers for Vertex AI ---
+
+def get_active_repo_path() -> str:
+    """Helper to get the path of the active repository."""
+    repo_id = active_repo_state.get_active_repo_id()
+    if repo_id and repo_id != "default":
+        return os.path.join(repo_manager.repos_base_path, repo_id)
+    return "."
+
+def list_files_wrapper(directory: str = ".") -> str:
+    """
+    List files in a directory.
+    Args:
+        directory: Relative path to the directory.
+    """
+    try:
+        base_path = get_active_repo_path()
+        # Ensure we don't traverse up
+        full_path = os.path.join(base_path, directory)
+        return list_files(full_path)
+    except Exception as e:
+        return f"Error listing files: {e}"
+
+def read_file_wrapper(filepath: str, max_lines: int = 500) -> str:
+    """
+    Read the content of a file.
+    Args:
+        filepath: Path to the file.
+        max_lines: Maximum number of lines to read.
+    """
+    try:
+        base_path = get_active_repo_path()
+        full_path = os.path.join(base_path, filepath)
+        return read_file(full_path, max_lines)
+    except Exception as e:
+        return f"Error reading file: {e}"
 
 def rag_search(query: str) -> str:
     """
@@ -62,8 +99,8 @@ def rag_search(query: str) -> str:
 # Map tools to functions
 tools_map = {
     "rag_search": rag_search,
-    "list_files": list_files,
-    "read_file": read_file,
+    "list_files": list_files_wrapper,
+    "read_file": read_file_wrapper,
     "list_package_files": list_package_files,
     "read_package_file": read_package_file
 }
