@@ -226,7 +226,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.error('Failed to send message:', error);
       updateLastMessage(get().messages[get().messages.length - 1].content + '\n\n*[Failed to send message]*');
     } finally {
-      set({ isStreaming: false, currentTool: null });
+      set({ isStreaming: false, currentToolCall: null });
     }
   }
 }));

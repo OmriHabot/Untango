@@ -6,7 +6,7 @@ import { Send, Loader2, Eraser, BookOpen } from 'lucide-react';
 import { RunbookModal } from './RunbookModal';
 
 export const ChatArea: React.FC = () => {
-  const { messages, sendMessage, isStreaming, clearChat } = useChatStore();
+  const { messages, sendMessage, isStreaming, clearMessages } = useChatStore();
   const { activeRepoId } = useRepoStore();
   const [input, setInput] = useState('');
   const [isRunbookOpen, setIsRunbookOpen] = useState(false);
@@ -66,7 +66,7 @@ export const ChatArea: React.FC = () => {
             <span className="hidden sm:inline">Runbook</span>
           </button>
           <button 
-            onClick={clearChat}
+            onClick={clearMessages}
             className="text-slate-500 hover:text-red-400 transition-colors p-2 rounded-md hover:bg-slate-900"
             title="Clear Chat"
           >
