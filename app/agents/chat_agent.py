@@ -102,7 +102,9 @@ tools_map = {
     "list_files": list_files_wrapper,
     "read_file": read_file_wrapper,
     "list_package_files": list_package_files,
-    "read_package_file": read_package_file
+    "read_package_file": read_package_file,
+    "get_active_repo_path": get_active_repo_path,
+    # get_system_instruction will be added after definition
 }
 
 # Define tool schemas for Vertex AI
@@ -165,6 +167,35 @@ rag_tool = types.Tool(
                 },
                 required=["package_name", "filepath"]
             )
+        ),
+        types.FunctionDeclaration(
+            name="get_system_instruction",
+            description="Get the system instruction used by the agent. Useful for self-reflection or understanding current instructions.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "context_details": types.Schema(type=types.Type.STRING, description="Optional context details to include in the instruction.")
+                },
+                required=[]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_active_repo_path",
+            description="Get the absolute path of the currently active repository.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={},
+                required=[]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_context_report",
+            description="Get the automated context report (Environment, Repository, Dependencies).",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={},
+                required=[]
+            )
         )
     ]
 )
@@ -184,9 +215,9 @@ IMPORTANT: You have access to powerful tools and you MUST use them proactively:
 - list_files: Explore the repository structure
 - read_file: Read file contents directly
 - list_package_files: Inspect installed dependencies
-- scan_environment: Get OS, Python version, GPU status, and installed packages
-- map_repo: Get a structural map of the repository (entry points, dependencies)
-- analyze_notebook: Extract imports and versions from a .ipynb file
+- get_system_instruction: View your own system instructions
+- get_active_repo_path: Check which repository is active
+- get_context_report: Get the automated context report (Environment, Repository, Dependencies)
 
 CHAIN OF THOUGHT PROTOCOL (REQUIRED):
 When you receive a user request, you must follow this reasoning process internally before answering:
@@ -222,6 +253,19 @@ Prefer reading entry point files (`main.py`, `__init__.py`) completely to unders
 
 Only ask the user for clarification if the question is genuinely ambiguous after you have tried to investigate.
 """
+
+def get_system_instruction_wrapper(context_details: str = "") -> str:
+    """Wrapper for get_system_instruction to be used as a tool."""
+    return get_system_instruction(context_details)
+
+def get_context_report_wrapper() -> str:
+    """Wrapper for get_context_report to be used as a tool."""
+    report = context_manager.get_context_report()
+    return report.to_string() if report else "Context not initialized."
+
+# Add to tools map
+tools_map["get_system_instruction"] = get_system_instruction_wrapper
+tools_map["get_context_report"] = get_context_report_wrapper
 
 
 async def chat_with_agent(request: ChatRequest) -> ChatResponse:
