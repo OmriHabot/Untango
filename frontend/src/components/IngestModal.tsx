@@ -53,7 +53,11 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
             <Github className="w-6 h-6" />
             Ingest Repository
           </h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white">
+          <button 
+            onClick={onClose} 
+            className="text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isLoading}
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -68,8 +72,9 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://github.com/username/repo"
-              className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
               required
+              disabled={isLoading}
             />
           </div>
 
@@ -82,7 +87,8 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
               placeholder="Default (auto-detect)"
-              className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
+              disabled={isLoading}
             />
           </div>
 
@@ -92,11 +98,19 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
             </div>
           )}
 
+          {isLoading && (
+            <div className="text-amber-400 text-sm bg-amber-400/10 p-2 rounded flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Ingestion in progress. Please do not refresh the page.
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 mt-6">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
+              disabled={isLoading}
+              className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancel
             </button>
@@ -106,7 +120,7 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
               className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-md font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              Ingest
+              {isLoading ? 'Ingesting...' : 'Ingest'}
             </button>
           </div>
         </form>

@@ -111,14 +111,23 @@ export const ChatArea: React.FC = () => {
       {/* Input Area */}
       <div className="p-4 border-t border-slate-800 bg-slate-950">
         <div className="max-w-4xl mx-auto relative">
+          {isStreaming && (
+            <div className="absolute -top-10 left-0 right-0 flex justify-center">
+              <div className="bg-purple-900/50 text-purple-200 text-xs px-3 py-1.5 rounded-full flex items-center gap-2 border border-purple-500/30 backdrop-blur-sm animate-pulse">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Generating response...
+              </div>
+            </div>
+          )}
+          
           <textarea
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask a question..."
+            placeholder={isStreaming ? "Waiting for response..." : "Ask a question..."}
             rows={1}
-            className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-4 pr-12 py-3 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 resize-none max-h-48"
+            className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-4 pr-12 py-3 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 resize-none max-h-48 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-900/50"
             disabled={isStreaming}
           />
           <button
