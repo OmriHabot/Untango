@@ -60,6 +60,7 @@ class ContextReport:
 class ContextManager:
     def __init__(self):
         self._current_report: Optional[ContextReport] = None
+        self._current_repo_id: Optional[str] = None
 
     def _parse_version_constraint(self, dep_string: str) -> tuple[str, Optional[str]]:
         """
@@ -116,9 +117,9 @@ class ContextManager:
             
         return results
 
-    def initialize_context(self, repo_path: str, repo_name: str) -> ContextReport:
+    def initialize_context(self, repo_path: str, repo_name: str, repo_id: str) -> ContextReport:
         """Run full analysis and cache the report."""
-        logger.info(f"Initializing context for {repo_name}...")
+        logger.info(f"Initializing context for {repo_name} (ID: {repo_id})...")
         
         # 1. Scan Env
         env = scan_environment()
@@ -134,10 +135,38 @@ class ContextManager:
             repo_map=repo,
             dependency_analysis=analysis
         )
+        self._current_repo_id = repo_id
         
         return self._current_report
 
     def get_context_report(self) -> Optional[ContextReport]:
+        """
+        Get the current context report.
+        Automatically re-initializes if the active repo has changed or if no report exists.
+        """
+        from .active_repo_state import active_repo_state
+        from .repo_manager import repo_manager
+
+        active_repo_id = active_repo_state.get_active_repo_id()
+        
+        # If no active repo is set (or default), we might return None or existing report
+        # But if we have an active repo ID, we must ensure the report matches it.
+        
+        if active_repo_id and active_repo_id != "default":
+            # Check if we need to re-initialize
+            if self._current_repo_id != active_repo_id or self._current_report is None:
+                logger.info(f"Context report stale or missing for {active_repo_id}. Re-initializing...")
+                
+                # Find repo details
+                repos = repo_manager.list_repositories()
+                repo = next((r for r in repos if r['repo_id'] == active_repo_id), None)
+                
+                if repo:
+                    return self.initialize_context(repo['path'], repo['name'], active_repo_id)
+                else:
+                    logger.warning(f"Active repo {active_repo_id} not found in manager. Cannot initialize context.")
+                    return None
+                    
         return self._current_report
 
 # Global instance

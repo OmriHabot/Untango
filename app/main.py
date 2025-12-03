@@ -99,7 +99,7 @@ async def select_repo(request: SetActiveRepositoryRequest, background_tasks: Bac
         active_repo_state.set_active_repo(request.repo_id)
         
         # Initialize Context Manager for this repo
-        context_manager.initialize_context(repo['path'], repo['name'])
+        context_manager.initialize_context(repo['path'], repo['name'], request.repo_id)
         
         # Trigger RAG Ingestion in Background
         background_tasks.add_task(run_background_ingest, repo['path'], request.repo_id, repo['name'])
