@@ -7,14 +7,13 @@ from typing import Optional
 import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api import ClientAPI
-import chromadb.utils.embedding_functions as embedding_functions
 from chromadb.config import Settings
-
+from app.embeddings import SentenceTransformerEmbeddingFunction
 
 # lazy initialization - clients are created on first access
 _chroma_client: Optional[ClientAPI] = None
 _collection: Optional[Collection] = None
-_embedding_func: Optional[embedding_functions.DefaultEmbeddingFunction] = None
+_embedding_func: Optional[SentenceTransformerEmbeddingFunction] = None
 
 
 def get_collection_name():
@@ -22,11 +21,15 @@ def get_collection_name():
     return os.getenv("CHROMA_COLLECTION_NAME", "python_code_chunks")
 
 
-def get_embedding_function() -> embedding_functions.DefaultEmbeddingFunction:
+def get_embedding_function() -> SentenceTransformerEmbeddingFunction:
     """get or create the embedding function"""
     global _embedding_func
     if _embedding_func is None:
-        _embedding_func = embedding_functions.DefaultEmbeddingFunction()
+        # Use a larger batch size for better throughput on GPU/MPS
+        _embedding_func = SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2",
+            batch_size=64
+        )
     return _embedding_func
 
 

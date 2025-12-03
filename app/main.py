@@ -3,6 +3,7 @@ FastAPI application for RAG backend with ChromaDB and Vertex AI.
 """
 import logging
 import os
+import json
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +28,11 @@ from .models import (
     IngestRepositoryRequest,
     RepositoryInfo,
     SetActiveRepositoryRequest,
-    ListRepositoriesResponse
+    SetActiveRepositoryRequest,
+    ListRepositoriesResponse,
+    ToolCall,
+    MessagePart,
+    Message
 )
 from .database import (
     get_collection,
@@ -669,6 +674,10 @@ async def chat_stream_endpoint(request: ChatRequest):
 
     async def stream_wrapper():
         full_response = ""
+        parts = []
+        tool_calls = []
+        current_tool_call = None
+        
         async for chunk in chat_with_agent_stream(request):
             # Capture content for history
             try:
@@ -682,17 +691,53 @@ async def chat_stream_endpoint(request: ChatRequest):
                     
                     try:
                         data = json.loads(line)
-                        if data.get("type") == "token":
-                            full_response += data.get("content", "")
+                        event_type = data.get("type")
+                        
+                        if event_type == "token":
+                            content = data.get("content", "")
+                            full_response += content
+                            
+                            # Update or create text part
+                            if parts and parts[-1].type == "text":
+                                parts[-1].content = (parts[-1].content or "") + content
+                            else:
+                                parts.append(MessagePart(type="text", content=content))
+                                
+                        elif event_type == "tool_start":
+                            tool_call = ToolCall(
+                                tool=data.get("tool"),
+                                args=data.get("args"),
+                                status="running"
+                            )
+                            tool_calls.append(tool_call)
+                            parts.append(MessagePart(type="tool", tool_call=tool_call))
+                            current_tool_call = tool_call
+                            
+                        elif event_type == "tool_end":
+                            if current_tool_call and current_tool_call.tool == data.get("tool"):
+                                current_tool_call.result = data.get("result")
+                                current_tool_call.status = "completed"
+                                current_tool_call = None
+                                
+                        elif event_type == "usage":
+                            # Usage stats are usually the last event
+                            pass
+                            
                     except json.JSONDecodeError:
                         pass
             except Exception:
                 pass
             yield chunk
             
-        # Save full assistant response
-        if active_repo_id and active_repo_id != "default" and full_response:
-             chat_history_manager.add_message(active_repo_id, Message(role="assistant", content=full_response))
+        # Save full assistant response with parts and tool calls
+        if active_repo_id and active_repo_id != "default":
+             msg = Message(
+                 role="assistant", 
+                 content=full_response,
+                 parts=parts,
+                 tool_calls=tool_calls
+             )
+             chat_history_manager.add_message(active_repo_id, msg)
 
     return StreamingResponse(
             stream_wrapper(),

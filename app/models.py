@@ -152,10 +152,28 @@ class RunbookResponse(BaseModel):
     repo_map: RepoMap
 
 
+class ToolCall(BaseModel):
+    """Tool call model"""
+    tool: str
+    args: Dict[str, Any]
+    result: Optional[str] = None
+    status: str = Field(default="completed", description="Status: 'running', 'completed', 'failed'")
+
+
+class MessagePart(BaseModel):
+    """Part of a message (text or tool call)"""
+    type: str = Field(..., description="Type: 'text' or 'tool'")
+    content: Optional[str] = None
+    tool_call: Optional[ToolCall] = None
+
+
 class Message(BaseModel):
     """Chat message model"""
     role: str = Field(..., description="Role: 'user' or 'assistant'")
     content: str = Field(..., description="Message content")
+    parts: Optional[List[MessagePart]] = Field(default=None, description="Message parts for rich rendering")
+    tool_calls: Optional[List[ToolCall]] = Field(default=None, description="Tool calls made in this message")
+    usage: Optional[TokenUsage] = Field(default=None, description="Token usage stats")
 
 
 class ChatRequest(BaseModel):

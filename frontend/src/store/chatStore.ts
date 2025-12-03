@@ -55,11 +55,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
         content: msg.content,
         id: Math.random().toString(36).substring(7),
         timestamp: Date.now(),
-        // For history, we might not have parts if it's old data, 
-        // but we can try to reconstruct or just leave it as content-only.
-        // If the backend sends parts in history later, we can use them.
-        // For now, just content.
-        parts: [{ type: 'text', content: msg.content }]
+        parts: msg.parts ? msg.parts.map((p: any) => ({
+            type: p.type,
+            content: p.content,
+            toolCall: p.tool_call ? {
+                tool: p.tool_call.tool,
+                args: p.tool_call.args,
+                result: p.tool_call.result,
+                status: p.tool_call.status
+            } : undefined
+        })) : [{ type: 'text', content: msg.content }],
+        toolCalls: msg.tool_calls ? msg.tool_calls.map((t: any) => ({
+            tool: t.tool,
+            args: t.args,
+            result: t.result,
+            status: t.status
+        })) : undefined
       }));
       set({ messages: formattedMessages });
     } catch (error) {
