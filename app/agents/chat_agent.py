@@ -223,6 +223,7 @@ Prefer reading entry point files (`main.py`, `__init__.py`) completely to unders
 Only ask the user for clarification if the question is genuinely ambiguous after you have tried to investigate.
 """
 
+
 async def chat_with_agent(request: ChatRequest) -> ChatResponse:
     """
     Process a chat request using Vertex AI with tools.
@@ -258,7 +259,8 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         )
 
         # 1. First turn: User -> Model (Model might call tools)
-        response = client.models.generate_content(
+        # Use async client
+        response = await client.aio.models.generate_content(
             model=request.model,
             contents=contents,
             config=config
@@ -319,6 +321,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
                     try:
                         # Convert args to dict
                         args_dict = {k: v for k, v in fn_args.items()}
+                        # Check if tool is async (not currently, but good practice)
                         result = tools_map[fn_name](**args_dict)
                     except Exception as e:
                         result = f"Error executing {fn_name}: {e}"
@@ -335,7 +338,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
             # Send tool outputs back to model
             contents.append(types.Content(role="user", parts=tool_outputs))
             
-            response = client.models.generate_content(
+            response = await client.aio.models.generate_content(
                 model=request.model,
                 contents=contents,
                 config=config
@@ -352,7 +355,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
                 temperature=0.7,
                 system_instruction=config.system_instruction
             )
-            response = client.models.generate_content(
+            response = await client.aio.models.generate_content(
                 model=request.model,
                 contents=contents,
                 config=final_config
@@ -413,8 +416,8 @@ async def chat_with_agent_stream(request: ChatRequest):
         current_turn = 0
         
         while current_turn < max_turns:
-            # Stream the response
-            response_stream = client.models.generate_content_stream(
+            # Stream the response using async client
+            response_stream = await client.aio.models.generate_content_stream(
                 model=request.model,
                 contents=contents,
                 config=config
@@ -423,13 +426,9 @@ async def chat_with_agent_stream(request: ChatRequest):
             # Accumulate full response for history and tool checking
             full_text = ""
             function_calls = []
-            current_function_call = None
             
-            # We need to aggregate the function call parts if they are streamed
-            # But usually, the SDK provides the function call in the first chunk or so.
-            # Let's iterate and handle both text and function calls.
-            
-            for chunk in response_stream:
+            # Iterate asynchronously
+            async for chunk in response_stream:
                 # Check for usage metadata
                 if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
                     meta = chunk.usage_metadata
@@ -451,20 +450,11 @@ async def chat_with_agent_stream(request: ChatRequest):
                         yield json.dumps({"type": "token", "content": part.text}) + "\n"
                     
                     if part.function_call:
-                        # In streaming, we might get partial function calls or full ones.
-                        # The google-genai SDK usually yields the full function call in one go for 'generate_content' stream?
-                        # Or we might need to accumulate. 
-                        # For simplicity, we'll assume we get the function call object.
-                        # If we receive multiple parts of the same function call, we might need to handle it.
-                        # However, the `part.function_call` object is usually fully formed in the chunk it appears in 
-                        # (or at least the SDK constructs it).
-                        # Let's collect it.
                         function_calls.append(part.function_call)
 
             # If we have function calls, execute them
             if function_calls:
                 # Add the model's response (with function calls) to history
-                # We need to reconstruct the content part properly
                 model_parts = []
                 if full_text:
                     model_parts.append(types.Part(text=full_text))
@@ -519,7 +509,6 @@ async def chat_with_agent_stream(request: ChatRequest):
             
             else:
                 # No function calls, we are done
-                # Add the final text response to history (optional, but good for consistency)
                 if full_text:
                     contents.append(types.Content(role="model", parts=[types.Part(text=full_text)]))
                 break

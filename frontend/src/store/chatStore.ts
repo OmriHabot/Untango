@@ -8,10 +8,17 @@ export interface ToolCall {
   status: 'running' | 'completed' | 'failed';
 }
 
+export interface MessagePart {
+  type: 'text' | 'tool';
+  content?: string;
+  toolCall?: ToolCall;
+}
+
 export interface Message extends ChatMessage {
   id: string;
   timestamp: number;
   toolCalls?: ToolCall[];
+  parts?: MessagePart[]; // Added for ordered rendering
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -22,33 +29,37 @@ export interface Message extends ChatMessage {
 interface ChatState {
   messages: Message[];
   isStreaming: boolean;
-  isLoading: boolean; // Added
-  currentToolCall: ToolCall | null; // Renamed from currentTool
+  isLoading: boolean;
+  currentToolCall: ToolCall | null;
   
   addMessage: (message: Message) => void;
   updateLastMessage: (content: string) => void;
-  sendMessage: (content: string, model?: string) => Promise<void>; // Kept model optional for implementation
-  clearMessages: () => Promise<void>; // Renamed from clearChat, now async
-  loadHistory: () => Promise<void>; // Added
+  sendMessage: (content: string, model?: string) => Promise<void>;
+  clearMessages: () => Promise<void>;
+  loadHistory: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isStreaming: false,
-  isLoading: false, // Added
-  currentToolCall: null, // Renamed from currentTool
+  isLoading: false,
+  currentToolCall: null,
 
   loadHistory: async () => {
     set({ isLoading: true });
     try {
       const { history } = await api.getChatHistory();
       // Map backend history to frontend message format
-      // Note: Backend history doesn't store tool calls yet, just text
       const formattedMessages: Message[] = history.map((msg: any) => ({
         role: msg.role,
         content: msg.content,
-        id: Math.random().toString(36).substring(7), // Generate temp ID
-        timestamp: Date.now()
+        id: Math.random().toString(36).substring(7),
+        timestamp: Date.now(),
+        // For history, we might not have parts if it's old data, 
+        // but we can try to reconstruct or just leave it as content-only.
+        // If the backend sends parts in history later, we can use them.
+        // For now, just content.
+        parts: [{ type: 'text', content: msg.content }]
       }));
       set({ messages: formattedMessages });
     } catch (error) {
@@ -58,7 +69,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  clearMessages: async () => { // Renamed from clearChat
+  clearMessages: async () => {
     set({ isLoading: true });
     try {
       await api.clearChatHistory();
@@ -93,7 +104,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       id: Date.now().toString(),
       role: 'user',
       content,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      parts: [{ type: 'text', content }]
     };
     addMessage(userMsg);
 
@@ -106,7 +118,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       role: 'model',
       content: '',
       timestamp: Date.now(),
-      toolCalls: []
+      toolCalls: [],
+      parts: []
     };
     addMessage(modelMsg);
 
@@ -150,13 +163,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
             
             if (event.type === 'token') {
               fullContent += event.content;
-              updateLastMessage(fullContent);
+              
+              set((state) => {
+                const msgs = [...state.messages];
+                const last = msgs[msgs.length - 1];
+                const newParts = [...(last.parts || [])];
+                
+                // If last part is text, append to it
+                if (newParts.length > 0 && newParts[newParts.length - 1].type === 'text') {
+                  newParts[newParts.length - 1] = {
+                    ...newParts[newParts.length - 1],
+                    content: (newParts[newParts.length - 1].content || '') + event.content
+                  };
+                } else {
+                  // Otherwise start new text part
+                  newParts.push({ type: 'text', content: event.content });
+                }
+                
+                msgs[msgs.length - 1] = { ...last, content: fullContent, parts: newParts };
+                return { messages: msgs };
+              });
+
             } else if (event.type === 'tool_start') {
               set((state) => {
                 const msgs = [...state.messages];
                 const last = msgs[msgs.length - 1];
-                // Create a new array for toolCalls to ensure immutability
                 const newToolCalls = [...(last.toolCalls || [])];
+                const newParts = [...(last.parts || [])];
                 
                 const newTool: ToolCall = {
                   tool: event.tool,
@@ -164,10 +197,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   status: 'running'
                 };
                 newToolCalls.push(newTool);
+                newParts.push({ type: 'tool', toolCall: newTool });
                 
-                // Update the message with new toolCalls
-                const newLast = { ...last, toolCalls: newToolCalls };
-                msgs[msgs.length - 1] = newLast;
+                msgs[msgs.length - 1] = { ...last, toolCalls: newToolCalls, parts: newParts };
 
                 return { 
                   messages: msgs, 
@@ -181,8 +213,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 
                 if (last.toolCalls) {
                     const newToolCalls = [...last.toolCalls];
+                    const newParts = [...(last.parts || [])];
+
                     // Find the running tool call matching this tool
-                    // We search from the end to find the most recent one
                     let toolIndex = -1;
                     for (let i = newToolCalls.length - 1; i >= 0; i--) {
                         if (newToolCalls[i].tool === event.tool && newToolCalls[i].status === 'running') {
@@ -192,14 +225,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     }
                     
                     if (toolIndex !== -1) {
-                        newToolCalls[toolIndex] = {
+                        const updatedTool = {
                             ...newToolCalls[toolIndex],
                             result: event.result,
-                            status: 'completed'
+                            status: 'completed' as const
                         };
+                        newToolCalls[toolIndex] = updatedTool;
                         
-                        const newLast = { ...last, toolCalls: newToolCalls };
-                        msgs[msgs.length - 1] = newLast;
+                        // Also update the tool in parts
+                        // We need to find the part that corresponds to this tool call
+                        // Since we push to both arrays in sync, we can try to find the part with the same tool name and running status
+                        // Or simpler: just find the last tool part that matches
+                        for (let i = newParts.length - 1; i >= 0; i--) {
+                            if (newParts[i].type === 'tool' && 
+                                newParts[i].toolCall?.tool === event.tool && 
+                                newParts[i].toolCall?.status === 'running') {
+                                newParts[i] = { type: 'tool', toolCall: updatedTool };
+                                break;
+                            }
+                        }
+
+                        msgs[msgs.length - 1] = { ...last, toolCalls: newToolCalls, parts: newParts };
                         return { messages: msgs, currentToolCall: null };
                     }
                 }
@@ -215,7 +261,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             } else if (event.type === 'error') {
               console.error('Stream error:', event.content);
               fullContent += `\n\n*[Error: ${event.content}]*`;
-              updateLastMessage(fullContent);
+              set((state) => {
+                 const msgs = [...state.messages];
+                 const last = msgs[msgs.length - 1];
+                 const newParts = [...(last.parts || [])];
+                 newParts.push({ type: 'text', content: `\n\n*[Error: ${event.content}]*` });
+                 msgs[msgs.length - 1] = { ...last, content: fullContent, parts: newParts };
+                 return { messages: msgs };
+              });
             }
           } catch (e) {
             console.error('Error parsing stream line:', line, e);

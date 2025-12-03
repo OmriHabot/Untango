@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Message, ToolCall } from '../store/chatStore';
+import { Message, ToolCall, MessagePart } from '../store/chatStore';
 import { User, Bot, Terminal, ChevronDown, ChevronRight, Check, X } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -53,6 +53,40 @@ const ToolCallDisplay: React.FC<{ toolCall: ToolCall }> = ({ toolCall }) => {
   );
 };
 
+const markdownComponents = {
+  code({ node, inline, className, children, ...props }: any) {
+    const match = /language-(\w+)/.exec(className || '');
+    return !inline && match ? (
+      <div className="rounded-md overflow-hidden my-2 border border-slate-700">
+        <div className="bg-slate-900 px-4 py-1 text-xs text-slate-400 border-b border-slate-700 flex justify-between items-center">
+          <span>{match[1]}</span>
+        </div>
+        <SyntaxHighlighter
+          style={vscDarkPlus}
+          language={match[1]}
+          PreTag="div"
+          customStyle={{ margin: 0, borderRadius: 0, background: '#0f172a' }}
+          {...props}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      </div>
+    ) : (
+      <code className="bg-slate-800 px-1 py-0.5 rounded text-purple-300 font-mono text-sm" {...props}>
+        {children}
+      </code>
+    );
+  }
+};
+
+const MarkdownContent: React.FC<{ content: string }> = React.memo(({ content }) => (
+  <div className="prose prose-invert prose-sm max-w-none break-words">
+    <ReactMarkdown components={markdownComponents}>
+      {content}
+    </ReactMarkdown>
+  </div>
+));
+
 export const MessageBubble: React.FC<Props> = ({ message }) => {
   const isUser = message.role === 'user';
 
@@ -70,47 +104,32 @@ export const MessageBubble: React.FC<Props> = ({ message }) => {
           "rounded-lg p-4 text-slate-200",
           isUser ? "bg-blue-600/20 border border-blue-600/30" : "bg-slate-800/50 border border-slate-700"
         )}>
-          {/* Tool Calls */}
-          {message.toolCalls && message.toolCalls.length > 0 && (
-            <div className="mb-4 space-y-2">
-              {message.toolCalls.map((tool, idx) => (
-                <ToolCallDisplay key={idx} toolCall={tool} />
-              ))}
-            </div>
-          )}
-
-          {/* Message Content */}
-          <div className="prose prose-invert prose-sm max-w-none break-words">
-            <ReactMarkdown
-              components={{
-                code({ node, inline, className, children, ...props }: any) {
-                  const match = /language-(\w+)/.exec(className || '');
-                  return !inline && match ? (
-                    <div className="rounded-md overflow-hidden my-2 border border-slate-700">
-                      <div className="bg-slate-900 px-4 py-1 text-xs text-slate-400 border-b border-slate-700 flex justify-between items-center">
-                        <span>{match[1]}</span>
-                      </div>
-                      <SyntaxHighlighter
-                        style={vscDarkPlus}
-                        language={match[1]}
-                        PreTag="div"
-                        customStyle={{ margin: 0, borderRadius: 0, background: '#0f172a' }}
-                        {...props}
-                      >
-                        {String(children).replace(/\n$/, '')}
-                      </SyntaxHighlighter>
-                    </div>
-                  ) : (
-                    <code className="bg-slate-800 px-1 py-0.5 rounded text-purple-300 font-mono text-sm" {...props}>
-                      {children}
-                    </code>
-                  );
+          
+          {/* Render Parts if available, otherwise fallback to legacy rendering */}
+          {message.parts && message.parts.length > 0 ? (
+            <div className="space-y-4">
+              {message.parts.map((part, idx) => {
+                if (part.type === 'text' && part.content) {
+                  return <MarkdownContent key={idx} content={part.content} />;
+                } else if (part.type === 'tool' && part.toolCall) {
+                  return <ToolCallDisplay key={idx} toolCall={part.toolCall} />;
                 }
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
-          </div>
+                return null;
+              })}
+            </div>
+          ) : (
+            <>
+              {/* Legacy Rendering for backward compatibility */}
+              {message.toolCalls && message.toolCalls.length > 0 && (
+                <div className="mb-4 space-y-2">
+                  {message.toolCalls.map((tool, idx) => (
+                    <ToolCallDisplay key={idx} toolCall={tool} />
+                  ))}
+                </div>
+              )}
+              <MarkdownContent content={message.content} />
+            </>
+          )}
           
           {/* Usage Stats */}
           {message.usage && (
