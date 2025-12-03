@@ -48,6 +48,7 @@ from .search import perform_hybrid_search
 from .logger import setup_logging, get_logger
 from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
 from .chat_history import chat_history_manager
+from .context_manager import context_manager
 
 
 LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
