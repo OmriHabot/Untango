@@ -28,6 +28,28 @@ curl http://localhost:8001/health
 
 Visit: http://localhost:8001/docs for interactive API documentation
 
+## Apple Silicon Support (Development)
+
+To leverage **MPS (Metal Performance Shaders)** for hardware-accelerated embeddings on macOS, you must run the backend **natively** (outside Docker) while keeping the database containerized. Docker on macOS cannot access the GPU.
+
+### 1. Start Dependencies (ChromaDB)
+Use the dedicated MPS compose file to run only the database:
+```bash
+docker-compose -f docker-compose.mps.yaml up -d
+```
+
+### 2. Run Backend Natively
+Use the helper script to start the backend with the correct environment variables:
+```bash
+# Ensure your virtual environment is active
+source .venv/bin/activate
+
+# Run the backend
+./run_backend_mps.sh
+```
+
+The backend will automatically detect MPS availability and use it for embedding generation.
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
