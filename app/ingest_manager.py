@@ -10,7 +10,7 @@ import asyncio
 from typing import Dict, Set
 
 from .chunker import chunk_python_code
-from .database import get_collection, get_collection_name, delete_file_chunks
+from .database import get_collection, get_collection_name, delete_file_chunks, get_embedding_function
 
 logger = logging.getLogger(__name__)
 
@@ -102,59 +102,99 @@ class IngestManager:
         if files_to_process:
             logger.info(f"Found {len(files_to_process)} files to ingest.")
             
-            BATCH_SIZE = 20  # Number of files to process concurrently
+            # Get embedding function and determine target batch size
+            embedding_function = get_embedding_function()
+            # Default to 64 if not set, target 10x for efficient GPU usage
+            model_batch_size = getattr(embedding_function, 'batch_size', 32)
+            TARGET_INSERT_BATCH = model_batch_size * 10
             
-            for i in range(0, len(files_to_process), BATCH_SIZE):
-                batch = files_to_process[i:i + BATCH_SIZE]
-                logger.info(f"Processing batch {i//BATCH_SIZE + 1}/{(len(files_to_process) + BATCH_SIZE - 1)//BATCH_SIZE} ({len(batch)} files)")
+            FILE_BATCH_SIZE = 32  # Keep file I/O concurrency reasonable
+            
+            # Accumulators for bulk insertion
+            pending_ids = []
+            pending_docs = []
+            pending_metas = []
+            pending_files = []  # (filepath, rel_path, mtime)
+            
+            async def flush_batch():
+                nonlocal pending_ids, pending_docs, pending_metas, pending_files, changes_detected
+                if not pending_ids:
+                    return
+
+                try:
+                    collection = get_collection()
+                    logger.info(f"Generating embeddings and inserting {len(pending_docs)} chunks...")
+                    
+                    # Generate embeddings explicitly using the batched function
+                    embeddings = embedding_function(pending_docs)
+
+                    collection.add(
+                        ids=pending_ids,
+                        documents=pending_docs,
+                        embeddings=embeddings,
+                        metadatas=pending_metas
+                    )
+                    
+                    # Update cache for all successfully processed files
+                    # We only update cache if the DB insert succeeds
+                    processed_paths = set()
+                    for _, rp, mtime in pending_files:
+                        self.cache[rp] = mtime
+                        processed_paths.add(rp)
+                        
+                    changes_detected += len(processed_paths)
+                    
+                except Exception as e:
+                    logger.error(f"Failed to insert batch of {len(pending_docs)} chunks to ChromaDB: {e}")
+                    # In a real system, we might want to retry or handle partial failures
                 
-                # Process batch concurrently
+                # Reset accumulators
+                pending_ids = []
+                pending_docs = []
+                pending_metas = []
+                pending_files = []
+
+            for i in range(0, len(files_to_process), FILE_BATCH_SIZE):
+                batch = files_to_process[i:i + FILE_BATCH_SIZE]
+                logger.info(f"Processing file batch {i//FILE_BATCH_SIZE + 1}/{(len(files_to_process) + FILE_BATCH_SIZE - 1)//FILE_BATCH_SIZE} (Batch size {FILE_BATCH_SIZE})")
+                
+                # Process files concurrently
                 tasks = [self._process_file(fp, rp) for fp, rp, _ in batch]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 
-                # Collect valid chunks
-                all_ids = []
-                all_docs = []
-                all_metas = []
-                processed_files = []
-                
+                # Collect results
+                batch_has_content = False
                 for j, result in enumerate(results):
+                    file_info = batch[j] # (filepath, rel_path, mtime)
+                    
                     if isinstance(result, Exception):
-                        logger.error(f"Failed to process {batch[j][1]}: {result}")
+                        logger.error(f"Failed to process {file_info[1]}: {result}")
                         continue
                         
                     if result:
                         ids, docs, metas = result
                         if ids:
-                            all_ids.extend(ids)
-                            all_docs.extend(docs)
-                            all_metas.extend(metas)
-                        processed_files.append(batch[j])
-
-                # Batch insert to ChromaDB
-                if all_ids:
-                    try:
-                        collection = get_collection()
-                        # ChromaDB recommends batches < 40k tokens. 
-                        # We might need to sub-batch if really huge, but 20 files should be safe.
-                        collection.add(
-                            ids=all_ids,
-                            documents=all_docs,
-                            metadatas=all_metas
-                        )
-                        changes_detected += len(processed_files)
+                            pending_ids.extend(ids)
+                            pending_docs.extend(docs)
+                            pending_metas.extend(metas)
+                            batch_has_content = True
                         
-                        # Update cache only after successful insertion
-                        for _, rp, mtime in processed_files:
-                            self.cache[rp] = mtime
-                            
-                    except Exception as e:
-                        logger.error(f"Failed to insert batch to ChromaDB: {e}")
-                else:
-                    # Even if no chunks (empty files), update cache
-                    for _, rp, mtime in processed_files:
-                        self.cache[rp] = mtime
-                        changes_detected += 1
+                        # Track file as pending (even if empty, we want to update cache)
+                        pending_files.append(file_info)
+
+                # If we have accumulated enough chunks, flush to DB
+                if len(pending_docs) >= TARGET_INSERT_BATCH:
+                    await flush_batch()
+                
+                # If we have pending files but no chunks (all empty files so far), 
+                # we should just update the cache for them to avoid re-processing.
+                # However, it's simpler to just let them ride until the end or next flush.
+                # But if we have a HUGE number of empty files, we might want to clear pending_files.
+                # For now, we'll stick to flushing on chunk count or end of loop.
+
+            # Final flush of any remaining items
+            if pending_files:
+                await flush_batch()
 
         if changes_detected > 0:
             self._save_cache()
