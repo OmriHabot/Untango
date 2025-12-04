@@ -275,6 +275,35 @@ class RepositoryManager:
                 })
         return repos
 
+    def save_runbook(self, repo_id: str, content: str):
+        """Save runbook content for a repository."""
+        repo_path = os.path.join(self.repos_base_path, repo_id)
+        if not os.path.exists(repo_path):
+            logger.warning(f"Cannot save runbook: Repository {repo_id} not found")
+            return
+            
+        runbook_path = os.path.join(repo_path, "runbook.md")
+        try:
+            with open(runbook_path, 'w') as f:
+                f.write(content)
+            logger.info(f"Saved runbook for {repo_id}")
+        except Exception as e:
+            logger.error(f"Failed to save runbook for {repo_id}: {e}")
+
+    def get_runbook(self, repo_id: str) -> Optional[str]:
+        """Retrieve runbook content for a repository."""
+        repo_path = os.path.join(self.repos_base_path, repo_id)
+        runbook_path = os.path.join(repo_path, "runbook.md")
+        
+        if os.path.exists(runbook_path):
+            try:
+                with open(runbook_path, 'r') as f:
+                    return f.read()
+            except Exception as e:
+                logger.error(f"Failed to read runbook for {repo_id}: {e}")
+        
+        return None
+
 
 # Global instance
 repo_manager = RepositoryManager()

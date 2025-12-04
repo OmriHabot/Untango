@@ -142,6 +142,7 @@ class RunbookRequest(BaseModel):
     """Request model for generating a runbook"""
     repo_path: str = Field(..., description="Absolute path to the repository")
     repo_name: str = Field(..., description="Name of the repository")
+    repo_id: str = Field(..., description="ID of the repository")
 
 
 class RunbookResponse(BaseModel):

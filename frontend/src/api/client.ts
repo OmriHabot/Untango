@@ -66,12 +66,22 @@ export const api = {
     return response.data;
   },
 
-  generateRunbook: async (repoPath: string, repoName: string) => {
+  generateRunbook: async (repoPath: string, repoName: string, repoId: string) => {
     const response = await client.post('/generate-runbook', {
       repo_path: repoPath,
-      repo_name: repoName
+      repo_name: repoName,
+      repo_id: repoId
     });
     return response.data;
+  },
+
+  getRunbook: async (repoId: string) => {
+    try {
+      const response = await client.get<{ runbook: string }>(`/runbook/${repoId}`);
+      return response.data;
+    } catch (error) {
+      return null;
+    }
   },
 
   getChatHistory: async () => {

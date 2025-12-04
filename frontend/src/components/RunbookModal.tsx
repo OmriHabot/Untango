@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, BookOpen, Loader2, Copy, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, BookOpen, Loader2, Copy, Check, RefreshCw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -18,11 +18,22 @@ export const RunbookModal: React.FC<Props> = ({ onClose }) => {
 
   const activeRepo = repositories.find(r => r.repo_id === activeRepoId);
 
-  const handleGenerate = async () => {
+  const loadRunbook = async (forceRegenerate = false) => {
     if (!activeRepo) return;
     setIsLoading(true);
     try {
-      const response = await api.generateRunbook(activeRepo.path, activeRepo.repo_id); // Using ID as name if name missing in repo object, but we should fix repo object
+      if (!forceRegenerate) {
+        // Try to get existing runbook first
+        const existing = await api.getRunbook(activeRepo.repo_id);
+        if (existing && existing.runbook) {
+          setRunbook(existing.runbook);
+          setIsLoading(false);
+          return;
+        }
+      }
+      
+      // Generate new
+      const response = await api.generateRunbook(activeRepo.path, activeRepo.name, activeRepo.repo_id);
       setRunbook(response.runbook);
     } catch (error) {
       console.error('Failed to generate runbook:', error);
@@ -40,11 +51,8 @@ export const RunbookModal: React.FC<Props> = ({ onClose }) => {
     }
   };
 
-  // Auto-generate on mount if not generated? Or wait for user?
-  // Let's wait for user click or auto-start.
-  // Better UX: Auto-start if opened.
-  React.useEffect(() => {
-    handleGenerate();
+  useEffect(() => {
+    loadRunbook();
   }, []);
 
   return (
@@ -57,13 +65,23 @@ export const RunbookModal: React.FC<Props> = ({ onClose }) => {
           </h2>
           <div className="flex items-center gap-2">
             {runbook && (
-              <button 
-                onClick={handleCopy}
-                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
-                title="Copy Markdown"
-              >
-                {copied ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
-              </button>
+              <>
+                <button 
+                  onClick={() => loadRunbook(true)}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
+                  title="Regenerate Runbook"
+                  disabled={isLoading}
+                >
+                  <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
+                </button>
+                <button 
+                  onClick={handleCopy}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors"
+                  title="Copy Markdown"
+                >
+                  {copied ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                </button>
+              </>
             )}
             <button onClick={onClose} className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors">
               <X className="w-5 h-5" />

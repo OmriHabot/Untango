@@ -571,7 +571,7 @@ async def generate_runbook(request: RunbookRequest) -> RunbookResponse:
     try:
         # 1. Get Context (Env + Repo)
         # We use initialize_context to ensure it's fresh or loaded
-        report = context_manager.initialize_context(request.repo_path, request.repo_name)
+        report = context_manager.initialize_context(request.repo_path, request.repo_name, request.repo_id)
         
         # 2. Generate Runbook
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
@@ -588,6 +588,9 @@ async def generate_runbook(request: RunbookRequest) -> RunbookResponse:
             location=location
         )
         
+        # Save the generated runbook
+        repo_manager.save_runbook(request.repo_id, runbook_content)
+        
         return RunbookResponse(
             status="success",
             runbook=runbook_content,
@@ -597,6 +600,21 @@ async def generate_runbook(request: RunbookRequest) -> RunbookResponse:
     except Exception as e:
         logger.exception("Runbook generation failed")
         raise HTTPException(status_code=500, detail=f"Runbook generation failed: {str(e)}")
+
+
+@app.get("/runbook/{repo_id}")
+async def get_runbook(repo_id: str):
+    """Get the saved runbook for a repository."""
+    try:
+        runbook = repo_manager.get_runbook(repo_id)
+        if not runbook:
+            raise HTTPException(status_code=404, detail="Runbook not found")
+        return {"runbook": runbook}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get runbook: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/chat", response_model=ChatResponse)
