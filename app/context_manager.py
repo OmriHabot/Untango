@@ -26,6 +26,30 @@ class ContextReport:
     repo_map: RepoMap
     dependency_analysis: List[DependencyStatus]
     
+    def _format_structure(self, structure: Dict[str, Any], indent: int = 0) -> str:
+        """Format structure as a tree string (limited depth)."""
+        lines = []
+        keys = sorted(structure.keys())
+        # Limit items per level to avoid context overflow
+        if len(keys) > 50:
+            keys = keys[:50]
+            keys.append("... (truncated)")
+            
+        for key in keys:
+            if key == "... (truncated)":
+                lines.append(f"{'  ' * indent}- {key}")
+                continue
+                
+            val = structure[key]
+            prefix = "  " * indent
+            if isinstance(val, dict):
+                lines.append(f"{prefix}- {key}/")
+                if indent < 3:  # Limit depth
+                    lines.append(self._format_structure(val, indent + 1))
+            else:
+                lines.append(f"{prefix}- {key}")
+        return "\n".join(lines)
+
     def to_string(self) -> str:
         """Convert report to a human/LLM readable string."""
         report = []
@@ -43,6 +67,9 @@ class ContextReport:
         report.append(f"Last Updated: {self.repo_map.last_updated}")
         report.append(f"Entry Points: {', '.join(self.repo_map.entry_points[:5])}" + 
                      (f" (+{len(self.repo_map.entry_points)-5} more)" if len(self.repo_map.entry_points) > 5 else ""))
+        
+        report.append("\n[File Structure]")
+        report.append(self._format_structure(self.repo_map.structure))
         
         # Dependency Analysis
         report.append("\n[Dependency Check]")

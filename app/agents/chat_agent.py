@@ -16,8 +16,7 @@ from google import genai
 from google.genai import types
 
 from ..models import ChatRequest, ChatResponse, TokenUsage
-from ..tools.filesystem import list_files, read_file
-from ..tools.dependencies import list_package_files, read_package_file
+from ..tools.filesystem import read_file
 from ..search import perform_hybrid_search
 from ..active_repo_state import active_repo_state
 
@@ -46,19 +45,7 @@ def get_active_repo_path() -> str:
         return os.path.join(repo_manager.repos_base_path, repo_id)
     return "."
 
-def list_files_wrapper(directory: str = ".") -> str:
-    """
-    List files in a directory.
-    Args:
-        directory: Relative path to the directory.
-    """
-    try:
-        base_path = get_active_repo_path()
-        # Ensure we don't traverse up
-        full_path = os.path.join(base_path, directory)
-        return list_files(full_path)
-    except Exception as e:
-        return f"Error listing files: {e}"
+
 
 def read_file_wrapper(filepath: str, max_lines: int = 500) -> str:
     """
@@ -97,12 +84,10 @@ def rag_search(query: str) -> str:
         return f"RAG search failed: {e}"
 
 # Map tools to functions
+# Map tools to functions
 tools_map = {
     "rag_search": rag_search,
-    "list_files": list_files_wrapper,
     "read_file": read_file_wrapper,
-    "list_package_files": list_package_files,
-    "read_package_file": read_package_file,
     "get_active_repo_path": get_active_repo_path,
     # get_system_instruction will be added after definition
 }
@@ -122,17 +107,6 @@ rag_tool = types.Tool(
             )
         ),
         types.FunctionDeclaration(
-            name="list_files",
-            description="List files in a directory. Use to explore the repo structure.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "directory": types.Schema(type=types.Type.STRING, description="Directory path (default '.')")
-                },
-                required=["directory"]
-            )
-        ),
-        types.FunctionDeclaration(
             name="read_file",
             description="Read the content of a file.",
             parameters=types.Schema(
@@ -142,30 +116,6 @@ rag_tool = types.Tool(
                     "max_lines": types.Schema(type=types.Type.INTEGER, description="Max lines to read (default 500)")
                 },
                 required=["filepath"]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="list_package_files",
-            description="List files in an installed python package (dependency).",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "package_name": types.Schema(type=types.Type.STRING, description="Name of the package (e.g. 'fastapi')")
-                },
-                required=["package_name"]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="read_package_file",
-            description="Read a specific file from an installed package. Use this after list_package_files to read dependency source code.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "package_name": types.Schema(type=types.Type.STRING, description="Name of the package (e.g. 'chromadb')"),
-                    "filepath": types.Schema(type=types.Type.STRING, description="Relative path within package (e.g. 'api/client.py')"),
-                    "max_lines": types.Schema(type=types.Type.INTEGER, description="Max lines to read (default 500)")
-                },
-                required=["package_name", "filepath"]
             )
         ),
         types.FunctionDeclaration(
@@ -212,12 +162,12 @@ def get_system_instruction(context_str: str) -> str:
 
 IMPORTANT: You have access to powerful tools and you MUST use them proactively:
 - rag_search: Search the codebase semantically for code logic, functions, and classes
-- list_files: Explore the repository structure
 - read_file: Read file contents directly
-- list_package_files: Inspect installed dependencies
 - get_system_instruction: View your own system instructions
 - get_active_repo_path: Check which repository is active
 - get_context_report: Get the automated context report (Environment, Repository, Dependencies)
+
+NOTE: The file structure is already provided in the "Automated Context" above. You do NOT need to list files to explore the directory structure.
 
 CHAIN OF THOUGHT PROTOCOL (REQUIRED):
 When you receive a user request, you must follow this reasoning process internally before answering:
@@ -225,6 +175,7 @@ When you receive a user request, you must follow this reasoning process internal
 1. **Analyze Request**: What is the user asking? What specific information is needed?
 2. **Check Context**: Look at the "Automated Context" above. 
    - Do I already know the OS, Python version, or Dependencies?
+   - Do I see the file structure?
    - If yes, use that information directly.
 3. **Check Sufficiency**: Do I have enough information to answer *completely*?
    - If the user asks about code logic, do I have the code? -> No, use `rag_search`.
