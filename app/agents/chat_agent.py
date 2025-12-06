@@ -152,9 +152,11 @@ rag_tool = types.Tool(
 
 from ..context_manager import context_manager
 
-def get_system_instruction(context_str: str) -> str:
+def get_system_instruction(context_str: str, repo_name: str) -> str:
     """Generate the system instruction with context and CoT protocol."""
-    return f"""You are an expert coding assistant for the 'Untango' repository. 
+    return f"""You are an expert software developer and coding assistant for the '{repo_name}' repository.
+You have full access to the source code of '{repo_name}' and are answering questions specifically about it.
+The dependency and information about the environment is provided below.
 
 === AUTOMATED CONTEXT ===
 {context_str}
@@ -245,12 +247,13 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         # Get Automated Context Report
         context_report = context_manager.get_context_report()
         context_str = context_report.to_string() if context_report else "Context not initialized yet."
+        repo_name = context_report.repo_map.repo_name if context_report else "Unknown Repo"
 
         # Configuration
         config = types.GenerateContentConfig(
             tools=[rag_tool],
             temperature=0.0, # Low temp for tool use
-            system_instruction=get_system_instruction(context_str)
+            system_instruction=get_system_instruction(context_str, repo_name)
         )
 
         # 1. First turn: User -> Model (Model might call tools)
@@ -400,11 +403,12 @@ async def chat_with_agent_stream(request: ChatRequest):
         # Get Automated Context Report
         context_report = context_manager.get_context_report()
         context_str = context_report.to_string() if context_report else "Context not initialized yet."
+        repo_name = context_report.repo_map.repo_name if context_report else "Unknown Repo"
 
         config = types.GenerateContentConfig(
             tools=[rag_tool],
             temperature=0.0,
-            system_instruction=get_system_instruction(context_str)
+            system_instruction=get_system_instruction(context_str, repo_name)
         )
 
         max_turns = 15

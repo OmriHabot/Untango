@@ -85,18 +85,18 @@ Use these snippets as ground truth for commands if relevant:
 
 TASK:
 Create a Markdown runbook (`RUNBOOK.md`) that explains:
-1. **Prerequisites**: 
+1. What is the purpose of this repository?
+2. **Prerequisites**: 
    - List required tools.
-   - **explicitly warn** about any "Dependency Analysis" issues listed above.
+   - If the dependency version is different from the required version, warn the user that dependencies might be outdated or incompatible with modern Python versions.
    - **Time Rot Warning**: If the "Last Updated" date is old (e.g. > 1 year), warn the user that dependencies might be outdated or incompatible with modern Python versions.
-2. **Setup**: 
-   - How to install dependencies (pip, conda, etc.).
+3. **Setup**: 
+   - Provide the suggested commands to install dependencies.
    - Use the "Retrieved Setup Instructions" to find the correct commands (e.g. `pip install -r requirements.txt` vs `poetry install`).
-3. **Execution**: 
-   - How to run the main entry points.
-4. **Troubleshooting**: 
-   - Address the specific dependency mismatches found.
+   - Provide the suggested commands to update the dependencies that may be outdated, and label it as optional.
    - Address environment limitations (e.g. if CUDA is missing).
+4. **Execution**: 
+   - Provide the suggested commands to run the repository after updating the dependencies.
 
 Keep it concise, actionable, and specific to the provided file structure.
 """

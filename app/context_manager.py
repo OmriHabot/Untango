@@ -105,7 +105,13 @@ class ContextManager:
         # installed_packages is list of "pkg==ver"
         package = package.lower().replace('-', '_') # Normalize slightly
         for pkg_str in installed_packages:
-            p, v = pkg_str.split('==')
+            if '==' in pkg_str:
+                p, v = pkg_str.split('==', 1)
+            else:
+                # Handle cases like "pkg @ file://..." or just "pkg"
+                p = pkg_str.split(' ')[0].split('@')[0]
+                v = "unknown"
+                
             if p.lower().replace('-', '_') == package:
                 return v
         return None
@@ -193,7 +199,16 @@ class ContextManager:
                 else:
                     logger.warning(f"Active repo {active_repo_id} not found in manager. Cannot initialize context.")
                     return None
-                    
+        
+        # Fallback: If no report exists (e.g. first run, default repo), initialize for current directory
+        if self._current_report is None:
+            logger.info("No context report found. Auto-initializing for current directory.")
+            try:
+                return self.initialize_context(".", "Current Directory", "default")
+            except Exception as e:
+                logger.error(f"Failed to auto-initialize context: {e}")
+                return None
+
         return self._current_report
 
 # Global instance
