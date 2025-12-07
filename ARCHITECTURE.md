@@ -90,7 +90,7 @@ User Query
 ┌─────────────────────────────────────────────────────────────┐
 │  Step 4: Vertex AI Inference                                │
 │                                                              │
-│  Model: gemini-2.0-flash-exp                                │
+│  Model: gemini-2.5-flash                                │
 │  Input: Prompt with context + question                      │
 │                                                              │
 │  ┌────────────────────────────────────────┐                │
@@ -114,7 +114,7 @@ User Query
 │    "retrieved_chunks": [...],                               │
 │    "chunks_used": 3,                                        │
 │    "answer": "Authentication in this codebase...",          │
-│    "model": "gemini-2.0-flash-exp",                         │
+│    "model": "gemini-2.5-flash",                         │
 │    "usage": {                                               │
 │      "input_tokens": 450,                                   │
 │      "output_tokens": 120,                                  │

@@ -111,7 +111,7 @@ curl -X POST "http://localhost:8001/query-db" \
     "query": "How does authentication work in this codebase?",
     "n_results": 10,
     "confidence_threshold": 0.2,
-    "model": "gemini-2.0-flash-exp"
+    "model": "gemini-2.5-flash"
   }'
 ```
 
@@ -130,7 +130,7 @@ curl -X POST "http://localhost:8001/inference" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Explain vector databases",
-    "model": "gemini-2.0-flash-exp"
+    "model": "gemini-2.5-flash"
   }'
 ```
 
@@ -194,7 +194,7 @@ Grant the service account the following roles:
    ```yaml
    environment:
      - GOOGLE_CLOUD_PROJECT=your-actual-project-id
-     - GOOGLE_CLOUD_LOCATION=us-central1  # or your preferred region
+     - GOOGLE_CLOUD_LOCATION=global  # or your preferred region
    ```
 
 #### 5. Enable Vertex AI API
@@ -254,7 +254,7 @@ The Docker setup automatically configures credentials via environment variables 
 environment:
   - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
   - GOOGLE_CLOUD_PROJECT=your-project-id
-  - GOOGLE_CLOUD_LOCATION=us-central1
+  - GOOGLE_CLOUD_LOCATION=global
 ```
 
 ### Local Development
@@ -264,7 +264,7 @@ Set environment variables before running locally:
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS="./service-account-key.json"
 export GOOGLE_CLOUD_PROJECT="your-project-id"
-export GOOGLE_CLOUD_LOCATION="us-central1"
+export GOOGLE_CLOUD_LOCATION="global"
 
 source .venv/bin/activate
 python -m app.main
@@ -281,7 +281,7 @@ python -m app.main
 | `CHROMA_COLLECTION_NAME` | Collection name | `python_code_chunks` |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP key file | - |
 | `GOOGLE_CLOUD_PROJECT` | GCP project ID | - |
-| `GOOGLE_CLOUD_LOCATION` | GCP region | `us-central1` |
+| `GOOGLE_CLOUD_LOCATION` | GCP region | `global` |
 
 ### Docker Compose
 

@@ -227,7 +227,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
     """
     try:
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
         
         if not project_id:
             raise HTTPException(status_code=503, detail="GCP Project ID not configured")
@@ -383,7 +383,7 @@ async def chat_with_agent_stream(request: ChatRequest):
     """
     try:
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
         
         if not project_id:
             yield json.dumps({"type": "error", "content": "GCP Project ID not configured"}) + "\n"

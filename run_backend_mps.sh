@@ -9,7 +9,7 @@ export CHROMA_PORT=8000
 export CHROMA_COLLECTION_NAME=python_code_chunks
 export GOOGLE_APPLICATION_CREDENTIALS=$(pwd)/service-account-key.json
 export GOOGLE_CLOUD_PROJECT=coms-6998-478617
-export GOOGLE_CLOUD_LOCATION=us-central1
+export GOOGLE_CLOUD_LOCATION=global
 
 # Check if virtual environment is active
 if [[ -z "$VIRTUAL_ENV" ]]; then

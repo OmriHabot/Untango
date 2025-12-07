@@ -134,6 +134,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
     addMessage(modelMsg);
 
+    // Fallback models in order
+    const FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+    const modelsToTry = [model, ...FALLBACK_MODELS];
+    // Remove duplicates in case the requested model is one of the fallbacks
+    const uniqueModels = [...new Set(modelsToTry)];
+
     try {
       // Prepare history for API
       const history = get().messages.slice(0, -1).map(m => ({
@@ -141,153 +147,189 @@ export const useChatStore = create<ChatState>((set, get) => ({
         content: m.content
       }));
 
-      const response = await fetch('http://localhost:8001/chat-stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [...history, { role: 'user', content }],
-          model
-        }),
-      });
+      let lastError: any = null;
 
-      if (!response.body) throw new Error('No response body');
+      for (const currentModel of uniqueModels) {
+        try {
+          console.log(`Attempting to send message with model: ${currentModel}`);
+          
+          const response = await fetch('http://localhost:8001/chat-stream', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messages: [...history, { role: 'user', content }],
+              model: currentModel
+            }),
+          });
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let fullContent = '';
+          if (!response.body) throw new Error('No response body');
+          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let fullContent = '';
+          let streamError = false;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-            
-            if (event.type === 'token') {
-              fullContent += event.content;
-              
-              set((state) => {
-                const msgs = [...state.messages];
-                const last = msgs[msgs.length - 1];
-                const newParts = [...(last.parts || [])];
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const event = JSON.parse(line);
                 
-                // If last part is text, append to it
-                if (newParts.length > 0 && newParts[newParts.length - 1].type === 'text') {
-                  newParts[newParts.length - 1] = {
-                    ...newParts[newParts.length - 1],
-                    content: (newParts[newParts.length - 1].content || '') + event.content
-                  };
-                } else {
-                  // Otherwise start new text part
-                  newParts.push({ type: 'text', content: event.content });
-                }
-                
-                msgs[msgs.length - 1] = { ...last, content: fullContent, parts: newParts };
-                return { messages: msgs };
-              });
-
-            } else if (event.type === 'tool_start') {
-              set((state) => {
-                const msgs = [...state.messages];
-                const last = msgs[msgs.length - 1];
-                const newToolCalls = [...(last.toolCalls || [])];
-                const newParts = [...(last.parts || [])];
-                
-                const newTool: ToolCall = {
-                  tool: event.tool,
-                  args: event.args,
-                  status: 'running'
-                };
-                newToolCalls.push(newTool);
-                newParts.push({ type: 'tool', toolCall: newTool });
-                
-                msgs[msgs.length - 1] = { ...last, toolCalls: newToolCalls, parts: newParts };
-
-                return { 
-                  messages: msgs, 
-                  currentToolCall: newTool
-                };
-              });
-            } else if (event.type === 'tool_end') {
-              set((state) => {
-                const msgs = [...state.messages];
-                const last = msgs[msgs.length - 1];
-                
-                if (last.toolCalls) {
-                    const newToolCalls = [...last.toolCalls];
+                if (event.type === 'token') {
+                  fullContent += event.content;
+                  
+                  set((state) => {
+                    const msgs = [...state.messages];
+                    const last = msgs[msgs.length - 1];
                     const newParts = [...(last.parts || [])];
-
-                    // Find the running tool call matching this tool
-                    let toolIndex = -1;
-                    for (let i = newToolCalls.length - 1; i >= 0; i--) {
-                        if (newToolCalls[i].tool === event.tool && newToolCalls[i].status === 'running') {
-                            toolIndex = i;
-                            break;
-                        }
+                    
+                    // If last part is text, append to it
+                    if (newParts.length > 0 && newParts[newParts.length - 1].type === 'text') {
+                      newParts[newParts.length - 1] = {
+                        ...newParts[newParts.length - 1],
+                        content: (newParts[newParts.length - 1].content || '') + event.content
+                      };
+                    } else {
+                      // Otherwise start new text part
+                      newParts.push({ type: 'text', content: event.content });
                     }
                     
-                    if (toolIndex !== -1) {
-                        const updatedTool = {
-                            ...newToolCalls[toolIndex],
-                            result: event.result,
-                            status: 'completed' as const
-                        };
-                        newToolCalls[toolIndex] = updatedTool;
-                        
-                        // Also update the tool in parts
-                        // We need to find the part that corresponds to this tool call
-                        // Since we push to both arrays in sync, we can try to find the part with the same tool name and running status
-                        // Or simpler: just find the last tool part that matches
-                        for (let i = newParts.length - 1; i >= 0; i--) {
-                            if (newParts[i].type === 'tool' && 
-                                newParts[i].toolCall?.tool === event.tool && 
-                                newParts[i].toolCall?.status === 'running') {
-                                newParts[i] = { type: 'tool', toolCall: updatedTool };
+                    msgs[msgs.length - 1] = { ...last, content: fullContent, parts: newParts };
+                    return { messages: msgs };
+                  });
+
+                } else if (event.type === 'tool_start') {
+                  set((state) => {
+                    const msgs = [...state.messages];
+                    const last = msgs[msgs.length - 1];
+                    const newToolCalls = [...(last.toolCalls || [])];
+                    const newParts = [...(last.parts || [])];
+                    
+                    const newTool: ToolCall = {
+                      tool: event.tool,
+                      args: event.args,
+                      status: 'running'
+                    };
+                    newToolCalls.push(newTool);
+                    newParts.push({ type: 'tool', toolCall: newTool });
+                    
+                    msgs[msgs.length - 1] = { ...last, toolCalls: newToolCalls, parts: newParts };
+
+                    return { 
+                      messages: msgs, 
+                      currentToolCall: newTool
+                    };
+                  });
+                } else if (event.type === 'tool_end') {
+                  set((state) => {
+                    const msgs = [...state.messages];
+                    const last = msgs[msgs.length - 1];
+                    
+                    if (last.toolCalls) {
+                        const newToolCalls = [...last.toolCalls];
+                        const newParts = [...(last.parts || [])];
+
+                        // Find the running tool call matching this tool
+                        let toolIndex = -1;
+                        for (let i = newToolCalls.length - 1; i >= 0; i--) {
+                            if (newToolCalls[i].tool === event.tool && newToolCalls[i].status === 'running') {
+                                toolIndex = i;
                                 break;
                             }
                         }
+                        
+                        if (toolIndex !== -1) {
+                            const updatedTool = {
+                                ...newToolCalls[toolIndex],
+                                result: event.result,
+                                status: 'completed' as const
+                            };
+                            newToolCalls[toolIndex] = updatedTool;
+                            
+                            // Also update the tool in parts
+                            for (let i = newParts.length - 1; i >= 0; i--) {
+                                if (newParts[i].type === 'tool' && 
+                                    newParts[i].toolCall?.tool === event.tool && 
+                                    newParts[i].toolCall?.status === 'running') {
+                                    newParts[i] = { type: 'tool', toolCall: updatedTool };
+                                    break;
+                                }
+                            }
 
-                        msgs[msgs.length - 1] = { ...last, toolCalls: newToolCalls, parts: newParts };
-                        return { messages: msgs, currentToolCall: null };
+                            msgs[msgs.length - 1] = { ...last, toolCalls: newToolCalls, parts: newParts };
+                            return { messages: msgs, currentToolCall: null };
+                        }
                     }
+                    return {};
+                  });
+                } else if (event.type === 'usage') {
+                  set((state) => {
+                    const msgs = [...state.messages];
+                    const last = msgs[msgs.length - 1];
+                    last.usage = event.usage;
+                    return { messages: msgs };
+                  });
+                } else if (event.type === 'error') {
+                   // Store error to throw after loop if this was a stream error
+                   throw new Error(event.content);
                 }
-                return {};
-              });
-            } else if (event.type === 'usage') {
-              set((state) => {
-                const msgs = [...state.messages];
-                const last = msgs[msgs.length - 1];
-                last.usage = event.usage;
-                return { messages: msgs };
-              });
-            } else if (event.type === 'error') {
-              console.error('Stream error:', event.content);
-              fullContent += `\n\n*[Error: ${event.content}]*`;
-              set((state) => {
-                 const msgs = [...state.messages];
-                 const last = msgs[msgs.length - 1];
-                 const newParts = [...(last.parts || [])];
-                 newParts.push({ type: 'text', content: `\n\n*[Error: ${event.content}]*` });
-                 msgs[msgs.length - 1] = { ...last, content: fullContent, parts: newParts };
-                 return { messages: msgs };
-              });
+              } catch (e) {
+                console.error('Error parsing stream line:', line, e);
+                // If it's a parsing error, we shouldn't necessarily fail the whole request,
+                // but if we caught an explicit error from above, rethrow it
+                if (e instanceof Error && e.message !== 'Error parsing stream line') {
+                    throw e;
+                }
+              }
             }
-          } catch (e) {
-            console.error('Error parsing stream line:', line, e);
           }
+          
+          // If we completed the stream successfully, return
+          return;
+
+        } catch (error) {
+          lastError = error;
+          console.warn(`Model ${currentModel} failed:`, error);
+          
+          // Prepare for retry: reset the last message content
+          set((state) => {
+            const msgs = [...state.messages];
+            if (msgs.length > 0) {
+              const last = msgs[msgs.length - 1];
+              if (last.role === 'model') {
+                 msgs[msgs.length - 1] = {
+                   ...last,
+                   content: '',
+                   parts: [],
+                   toolCalls: []
+                 };
+              }
+            }
+            return { messages: msgs, currentToolCall: null };
+          });
+          
+          // Continue to next model
         }
       }
+      
+      // If we exhausted all models
+      console.error('All models failed. Last error:', lastError);
+      updateLastMessage(get().messages[get().messages.length - 1].content + '\n\n*[Failed to send message: All models unavailable]*');
+
     } catch (error) {
-      console.error('Failed to send message:', error);
+       // This catch block might not be reached due to internal handling, but good as safety net
+      console.error('Failed to send message (fatal):', error);
       updateLastMessage(get().messages[get().messages.length - 1].content + '\n\n*[Failed to send message]*');
     } finally {
       set({ isStreaming: false, currentToolCall: null });

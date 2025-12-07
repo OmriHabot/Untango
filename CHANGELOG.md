@@ -133,7 +133,7 @@ curl -X POST "http://localhost:8001/query-db" \
     "query": "How does authentication work?",
     "n_results": 10,
     "confidence_threshold": 0.2,
-    "model": "gemini-2.0-flash-exp"
+    "model": "gemini-2.5-flash"
   }'
 ```
 
@@ -255,7 +255,7 @@ docker-compose up --build -d
 ```bash
 curl -X POST "http://localhost:8001/inference" \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Hello", "model": "gemini-2.0-flash-exp"}'
+  -d '{"prompt": "Hello", "model": "gemini-2.5-flash"}'
 ```
 
 **Interactive docs:**

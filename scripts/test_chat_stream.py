@@ -10,7 +10,7 @@ def test_chat_stream():
         "messages": [
             {"role": "user", "content": "What files are in the current directory?"}
         ],
-        "model": "gemini-2.0-flash-exp"
+        "model": "gemini-2.5-flash"
     }
     
     print(f"Connecting to {url}...")

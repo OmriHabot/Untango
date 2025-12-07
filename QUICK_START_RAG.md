@@ -42,7 +42,7 @@ curl -X POST "http://localhost:8001/query-db" \
     "query": "How does user authentication work in this codebase?",
     "n_results": 10,
     "confidence_threshold": 0.2,
-    "model": "gemini-2.0-flash-exp"
+    "model": "gemini-2.5-flash"
   }'
 ```
 
@@ -75,7 +75,7 @@ curl -X POST "http://localhost:8001/query-db" \
   ],
   "chunks_used": 3,
   "answer": "Based on the retrieved code, the authentication works by...",
-  "model": "gemini-2.0-flash-exp",
+  "model": "gemini-2.5-flash",
   "usage": {
     "input_tokens": 450,
     "output_tokens": 120,
@@ -108,7 +108,7 @@ This script will:
 | `query` | string | **required** | Your question to answer |
 | `n_results` | int | 10 | Number of chunks to retrieve |
 | `confidence_threshold` | float | 0.2 | Minimum combined score (0.0-1.0) |
-| `model` | string | "gemini-2.0-flash-exp" | Vertex AI model to use |
+| `model` | string | "gemini-2.5-flash" | Vertex AI model to use |
 
 ### Response Scores
 

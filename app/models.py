@@ -32,7 +32,7 @@ class QueryRequest(BaseModel):
 class InferenceRequest(BaseModel):
     """Request model for Vertex AI inference"""
     prompt: str = Field(..., description="Prompt for the AI model", min_length=1, max_length=10000)
-    model: str = Field(default="gemini-2.0-flash-exp", description="Model to use for inference")
+    model: str = Field(default="gemini-2.5-flash", description="Model to use for inference")
 
 
 class ChunkMetadata(BaseModel):
@@ -95,7 +95,7 @@ class RAGQueryRequest(BaseModel):
         ge=0.0,
         description="Minimum BM25 score before RRF fusion"
     )
-    model: str = Field(default="gemini-2.0-flash-exp", description="Model to use for inference")
+    model: str = Field(default="gemini-2.5-flash", description="Model to use for inference")
 
 
 class RetrievedChunk(BaseModel):
@@ -180,7 +180,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for chat"""
     messages: List[Message] = Field(..., description="Chat history")
-    model: str = Field(default="gemini-2.5-flash", description="Model to use")  # Field(default="gemini-2.0-flash-exp", description="Model to use")
+    model: str = Field(default="gemini-2.5-flash", description="Model to use")  # Field(default="gemini-2.5-flash", description="Model to use")
 
 
 class ChatResponse(BaseModel):

@@ -37,7 +37,7 @@ class TestRunbookPrompt(unittest.TestCase):
 
         # 4. Run Generator
         asyncio.run(generate_runbook_content(
-            repo_map, env_info, deps, "test-project", "us-central1"
+            repo_map, env_info, deps, "test-project", "global"
         ))
 
         # 5. Verify Prompt Content

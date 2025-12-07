@@ -279,7 +279,7 @@ async def query_db(request: RAGQueryRequest) -> RAGQueryResponse:
         # Check if GCP is configured
         credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
         
         if not credentials_path or not project_id:
             logger.warning(
@@ -487,7 +487,7 @@ async def generate_inference(request: InferenceRequest) -> InferenceResponse:
         # Check if GCP is configured
         credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
         
         if not credentials_path or not project_id:
             logger.warning(
@@ -575,7 +575,7 @@ async def generate_runbook(request: RunbookRequest) -> RunbookResponse:
         
         # 2. Generate Runbook
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-        location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
         
         if not project_id:
              raise HTTPException(status_code=503, detail="GCP Project ID not configured")

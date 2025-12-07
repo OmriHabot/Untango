@@ -24,7 +24,7 @@ async def generate_runbook_content(
     dependency_analysis: List[DependencyStatus],
     project_id: str, 
     location: str,
-    model: str = "gemini-2.0-flash-exp"
+    model: str = "gemini-2.5-flash"
 ) -> str:
     """
     Generate the runbook content using LLM with RAG and Dependency Analysis.
@@ -102,30 +102,50 @@ Keep it concise, actionable, and specific to the provided file structure.
 """
 
     # 4. Call Vertex AI
-    try:
-        client = genai.Client(
-            vertexai=True,
-            project=project_id,
-            location=location
-        )
-        
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt
-        )
-        
-        # Log usage
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
-            meta = response.usage_metadata
-            logger.info(
-                "Runbook generation token usage: input=%d, output=%d, total=%d",
-                getattr(meta, 'prompt_token_count', 0),
-                getattr(meta, 'candidates_token_count', 0),
-                getattr(meta, 'total_token_count', 0)
+    
+    # Fallback models in order
+    FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+    models_to_try = [model] + FALLBACK_MODELS
+    # Remove duplicates
+    unique_models = []
+    seen = set()
+    for m in models_to_try:
+        if m not in seen:
+            unique_models.append(m)
+            seen.add(m)
+
+    last_error = None
+
+    for current_model in unique_models:
+        try:
+            logger.info(f"Attempting runbook generation with model: {current_model}")
+            client = genai.Client(
+                vertexai=True,
+                project=project_id,
+                location=location
             )
-        
-        return getattr(response, 'text', '') or "Error: No response generated."
-        
-    except Exception as e:
-        logger.exception("Failed to generate runbook with LLM")
-        return f"Error generating runbook: {str(e)}"
+            
+            response = client.models.generate_content(
+                model=current_model,
+                contents=prompt
+            )
+            
+            # Log usage
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                meta = response.usage_metadata
+                logger.info(
+                    "Runbook generation token usage: input=%d, output=%d, total=%d",
+                    getattr(meta, 'prompt_token_count', 0),
+                    getattr(meta, 'candidates_token_count', 0),
+                    getattr(meta, 'total_token_count', 0)
+                )
+            
+            return getattr(response, 'text', '') or "Error: No response generated."
+
+        except Exception as e:
+            logger.warning(f"Model {current_model} failed: {e}")
+            last_error = e
+            continue
+
+    logger.error(f"All models failed. Last error: {last_error}")
+    return f"Error generating runbook: {str(last_error)}"
