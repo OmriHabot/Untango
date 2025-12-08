@@ -14,6 +14,9 @@ interface RepoState {
   
   viewMode: 'chat' | 'showcase';
   setViewMode: (mode: 'chat' | 'showcase') => void;
+
+  activeShowcaseTab: 'docs' | 'agent' | 'qualitative' | 'hybrid' | 'evaluation' | 'chunking';
+  setActiveShowcaseTab: (tab: 'docs' | 'agent' | 'qualitative' | 'hybrid' | 'evaluation' | 'chunking') => void;
 }
 
 export const useRepoStore = create<RepoState>((set, get) => ({
@@ -22,7 +25,9 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   isLoading: false,
   ingestionStatuses: {},
   viewMode: 'chat',
+  activeShowcaseTab: 'docs',
 
+  setActiveShowcaseTab: (tab) => set({ activeShowcaseTab: tab }),
   setViewMode: (mode) => set({ viewMode: mode }),
 
   fetchRepositories: async () => {

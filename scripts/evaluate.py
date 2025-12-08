@@ -259,8 +259,7 @@ def run_rag_query(query: str, client: httpx.Client, config: Dict[str, Any]) -> D
     try:
         payload = {
             "query": query,
-            "n_results": 10,
-            "confidence_threshold": 0.001  # Very low to get results
+            "n_results": 10
         }
         
         # Apply ablation config
@@ -269,8 +268,10 @@ def run_rag_query(query: str, client: httpx.Client, config: Dict[str, Any]) -> D
         if config.get("disable_vector"):
             payload["vector_similarity_threshold"] = 1.1
             
+        # Use hybrid search endpoint directly to avoid LLM generation latency
+        # We only need retrieval metrics
         response = client.post(
-            f"{API_BASE}/query-db",
+            f"{API_BASE}/query-hybrid",
             json=payload,
             timeout=30.0
         )
@@ -280,6 +281,13 @@ def run_rag_query(query: str, client: httpx.Client, config: Dict[str, Any]) -> D
              
         response.raise_for_status()
         result = response.json()
+        
+        # Adapt /query-hybrid response format to match what evaluate_retrieval expects
+        # /query-hybrid returns {"results": [...]}
+        # /query-db returns {"retrieved_chunks": [...]}
+        if "results" in result:
+             result["retrieved_chunks"] = result["results"]
+             
         latency = time.time() - start_time
         return {"result": result, "latency": latency, "success": True}
     except httpx.TimeoutException:

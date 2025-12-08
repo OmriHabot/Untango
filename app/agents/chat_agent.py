@@ -366,9 +366,9 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 meta = response.usage_metadata
                 usage = TokenUsage(
-                    input_tokens=getattr(meta, 'prompt_token_count', 0),
-                    output_tokens=getattr(meta, 'candidates_token_count', 0),
-                    total_tokens=getattr(meta, 'total_token_count', 0)
+                    input_tokens=getattr(meta, 'prompt_token_count', 0) or 0,
+                    output_tokens=getattr(meta, 'candidates_token_count', 0) or 0,
+                    total_tokens=getattr(meta, 'total_token_count', 0) or 0
                 )
                 input_cost, output_cost, total_cost = calculate_cost(usage.input_tokens, usage.output_tokens)
                 logger.info(
@@ -525,9 +525,9 @@ async def chat_with_agent_stream(request: ChatRequest):
                 if hasattr(chunk, 'usage_metadata') and chunk.usage_metadata:
                     meta = chunk.usage_metadata
                     usage = {
-                        "input_tokens": getattr(meta, 'prompt_token_count', 0),
-                        "output_tokens": getattr(meta, 'candidates_token_count', 0),
-                        "total_tokens": getattr(meta, 'total_token_count', 0)
+                        "input_tokens": getattr(meta, 'prompt_token_count', 0) or 0,
+                        "output_tokens": getattr(meta, 'candidates_token_count', 0) or 0,
+                        "total_tokens": getattr(meta, 'total_token_count', 0) or 0
                     }
                     yield json.dumps({"type": "usage", "usage": usage}) + "\n"
 
