@@ -12,45 +12,55 @@ A production-ready FastAPI backend for Retrieval-Augmented Generation (RAG) with
 
 ## Quick Start
 
-After pulling the repository, follow these steps to get started.
+Get the full stack up and running in minutes. You will need **Docker** and **Node.js** (v18+) installed.
 
-### 1. Start the Backend Services
-
+### 1. Start the Backend
+Spin up ChromaDB and the FastAPI backend:
 ```bash
 docker-compose up --build -d
 ```
+> **Note:** The backend runs on `http://localhost:8001` and ChromaDB on `http://localhost:8000`.
 
-This starts:
-- **ChromaDB** (vector database) on port 8000
-- **RAG Backend** (FastAPI server) on port 8001
-
-### 2. Verify Health
-
-```bash
-curl http://localhost:8001/health
-```
-
-### 3. Install Frontend Dependencies
-
+### 2. Start the Frontend
+In a new terminal, launch the React UI:
 ```bash
 cd frontend
-pnpm install
+pnpm install && pnpm run dev
 ```
+The UI will open at `http://localhost:5173`.
 
-### 4. Start the Frontend Dev Server
+### 3. Verify System Status
+Visit `http://localhost:8001/health` to confirm the backend is connected to the vector database.
 
+---
+
+## Ingesting Repositories
+
+Untango supports both remote GitHub repositories and local project directories.
+
+### Option A: Remote GitHub Repository
+1. Open the web UI (`http://localhost:5173`).
+2. Click **"Ingest Repository"** in the sidebar.
+3. Select the **GitHub** tab.
+4. Paste the repository URL (e.g., `https://github.com/fastapi/fastapi`) and optionally specify a branch.
+5. Click **Ingest**. The system will clone, parse, and chunk the codebase in the background.
+
+### Option B: Local Repository (CLI)
+To ingest a project from your local machine (e.g., for privacy or development speed), use the bundled CLI tool. This automatically detects virtual environments and syncs changes.
+
+**One-time Upload:**
 ```bash
-# From the frontend directory
-pnpm run dev
+# Run from the project root
+python scripts/untango_local.py /path/to/my-project --server http://localhost:8001
 ```
 
-The frontend will be available at http://localhost:5173 (or the port shown in your terminal).
+**Continuous Sync (Watch Mode):**
+Keep your RAG context up-to-date as you code:
+```bash
+python scripts/untango_local.py /path/to/my-project --server http://localhost:8001 --watch
+```
+*The CLI will upload changes automatically whenever you save a file.*
 
-> **Note:** Both the backend (port 8001) and frontend dev server need to be running for full functionality.
-
-### 5. Test the API
-
-Visit: http://localhost:8001/docs for interactive API documentation
 
 ## Apple Silicon Support (Development)
 
