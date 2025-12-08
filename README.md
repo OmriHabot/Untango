@@ -12,11 +12,17 @@ A production-ready FastAPI backend for Retrieval-Augmented Generation (RAG) with
 
 ## Quick Start
 
-### 1. Start the Services
+After pulling the repository, follow these steps to get started.
+
+### 1. Start the Backend Services
 
 ```bash
 docker-compose up --build -d
 ```
+
+This starts:
+- **ChromaDB** (vector database) on port 8000
+- **RAG Backend** (FastAPI server) on port 8001
 
 ### 2. Verify Health
 
@@ -24,46 +30,27 @@ docker-compose up --build -d
 curl http://localhost:8001/health
 ```
 
-### 3. Test the API
-
-Visit: http://localhost:8001/docs for interactive API documentation
-
-## Developer Setup
-
-After pulling the repository, follow these steps to set up your development environment.
-
-### 1. Install Frontend Dependencies
+### 3. Install Frontend Dependencies
 
 ```bash
 cd frontend
 pnpm install
 ```
 
-### 2. Start the Backend
-
-Make sure the backend services are running first:
+### 4. Start the Frontend Dev Server
 
 ```bash
-# From the project root
-docker-compose up --build -d
-```
-
-Or for Apple Silicon (see section below for details):
-```bash
-docker-compose -f docker-compose.mps.yaml up -d
-./run_backend_mps.sh
-```
-
-### 3. Start the Frontend Dev Server
-
-```bash
-cd frontend
+# From the frontend directory
 pnpm run dev
 ```
 
 The frontend will be available at http://localhost:5173 (or the port shown in your terminal).
 
 > **Note:** Both the backend (port 8001) and frontend dev server need to be running for full functionality.
+
+### 5. Test the API
+
+Visit: http://localhost:8001/docs for interactive API documentation
 
 ## Apple Silicon Support (Development)
 
