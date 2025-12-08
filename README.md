@@ -28,6 +28,43 @@ curl http://localhost:8001/health
 
 Visit: http://localhost:8001/docs for interactive API documentation
 
+## Developer Setup
+
+After pulling the repository, follow these steps to set up your development environment.
+
+### 1. Install Frontend Dependencies
+
+```bash
+cd frontend
+pnpm install
+```
+
+### 2. Start the Backend
+
+Make sure the backend services are running first:
+
+```bash
+# From the project root
+docker-compose up --build -d
+```
+
+Or for Apple Silicon (see section below for details):
+```bash
+docker-compose -f docker-compose.mps.yaml up -d
+./run_backend_mps.sh
+```
+
+### 3. Start the Frontend Dev Server
+
+```bash
+cd frontend
+pnpm run dev
+```
+
+The frontend will be available at http://localhost:5173 (or the port shown in your terminal).
+
+> **Note:** Both the backend (port 8001) and frontend dev server need to be running for full functionality.
+
 ## Apple Silicon Support (Development)
 
 To leverage **MPS (Metal Performance Shaders)** for hardware-accelerated embeddings on macOS, you must run the backend **natively** (outside Docker) while keeping the database containerized. Docker on macOS cannot access the GPU.
