@@ -82,13 +82,112 @@ class RepositoryManager:
         return repo_path
     
     def validate_local_path(self, path: str) -> str:
-        """Validate and return absolute path for local directory."""
+        """Validate and return absolute path for local directory.
+        
+        Handles Docker path translation:
+        - User enters: /Users/username/Documents/Project
+        - Docker sees:  /host/Documents/Project
+        """
         abs_path = os.path.abspath(path)
-        if not os.path.exists(abs_path):
+        
+        # Check if path exists directly (running locally)
+        if os.path.exists(abs_path) and os.path.isdir(abs_path):
+            return abs_path
+        
+        # Try Docker path translation: /Users/*/Documents/* -> /host/Documents/*
+        import re
+        docker_path = None
+        
+        # Match patterns like /Users/username/Documents/... or ~/Documents/...
+        match = re.match(r'^(/Users/[^/]+|~)/Documents/(.+)$', path)
+        if match:
+            docker_path = f"/host/Documents/{match.group(2)}"
+        
+        # Also try /home/username/Documents/... for Linux
+        if not docker_path:
+            match = re.match(r'^/home/[^/]+/Documents/(.+)$', path)
+            if match:
+                docker_path = f"/host/Documents/{match.group(1)}"
+        
+        if docker_path and os.path.exists(docker_path) and os.path.isdir(docker_path):
+            logger.info(f"Translated path {path} -> {docker_path}")
+            return docker_path
+        
+        # Path doesn't exist
+        if docker_path:
+            raise FileNotFoundError(
+                f"Local path does not exist: {abs_path}\n"
+                f"(Also tried Docker mount: {docker_path})"
+            )
+        else:
             raise FileNotFoundError(f"Local path does not exist: {abs_path}")
-        if not os.path.isdir(abs_path):
-            raise ValueError(f"Path is not a directory: {abs_path}")
-        return abs_path
+    
+    def find_venv_python(self, repo_path: str) -> Optional[str]:
+        """Find virtual environment Python executable in the repo."""
+        # Common venv locations
+        venv_patterns = [
+            os.path.join(repo_path, "venv", "bin", "python"),
+            os.path.join(repo_path, ".venv", "bin", "python"),
+            os.path.join(repo_path, "env", "bin", "python"),
+            os.path.join(repo_path, ".env", "bin", "python"),
+        ]
+        
+        for pattern in venv_patterns:
+            if os.path.exists(pattern):
+                logger.info(f"Found venv python at: {pattern}")
+                return pattern
+        
+        # Search recursively for **/bin/python (limited depth)
+        for root, dirs, files in os.walk(repo_path):
+            # Limit depth to 2 levels
+            depth = root.replace(repo_path, '').count(os.sep)
+            if depth > 2:
+                dirs[:] = []
+                continue
+            
+            bin_path = os.path.join(root, "bin", "python")
+            if os.path.exists(bin_path):
+                logger.info(f"Found venv python at: {bin_path}")
+                return bin_path
+        
+        return None
+    
+    def get_file_hashes(self, repo_path: str) -> dict:
+        """Get MD5 hashes of all relevant files in the repository."""
+        hashes = {}
+        
+        for root, dirs, files in os.walk(repo_path):
+            # Skip common ignore directories
+            dirs[:] = [d for d in dirs if d not in {'.git', '__pycache__', '.venv', 'venv', 'node_modules', '.repos'}]
+            
+            for file in files:
+                # Only hash code files
+                if file.endswith(('.py', '.js', '.ts', '.tsx', '.jsx', '.md', '.txt', '.json', '.yaml', '.yml')):
+                    filepath = os.path.join(root, file)
+                    rel_path = os.path.relpath(filepath, repo_path)
+                    try:
+                        with open(filepath, 'rb') as f:
+                            hashes[rel_path] = hashlib.md5(f.read()).hexdigest()
+                    except Exception as e:
+                        logger.debug(f"Failed to hash {filepath}: {e}")
+        
+        return hashes
+    
+    def get_sample_files(self, repo_path: str, limit: int = 10) -> List[str]:
+        """Get a sample of files from the repository for preview."""
+        sample_files = []
+        
+        for root, dirs, files in os.walk(repo_path):
+            dirs[:] = [d for d in dirs if d not in {'.git', '__pycache__', '.venv', 'venv', 'node_modules'}]
+            
+            for file in files:
+                if file.endswith(('.py', '.js', '.ts', '.tsx', '.md')):
+                    rel_path = os.path.relpath(os.path.join(root, file), repo_path)
+                    sample_files.append(rel_path)
+                    if len(sample_files) >= limit:
+                        return sample_files
+        
+        return sample_files
     
     def parse_requirements_txt(self, repo_path: str) -> List[str]:
         """Parse requirements.txt and return list of dependencies."""

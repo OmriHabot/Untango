@@ -110,5 +110,20 @@ export const api = {
   getReadme: async () => {
     const response = await client.get<{ content: string }>('/api/docs/readme');
     return response.data;
+  },
+
+  validateLocalPath: async (path: string) => {
+    const response = await client.post<{
+      valid: boolean;
+      absolute_path: string | null;
+      sample_files: string[];
+      venv_python: string | null;
+      error?: string;
+    }>('/api/validate-local-path', { path });
+    return response.data;
+  },
+
+  isLocalBackend: () => {
+    return API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
   }
 };

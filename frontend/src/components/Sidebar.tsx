@@ -45,7 +45,7 @@ export const Sidebar: React.FC = () => {
 
       <div className="p-2 border-b border-slate-800">
         <button
-          onClick={() => setViewMode('showcase')}
+          onClick={() => setViewMode(viewMode === 'showcase' ? 'chat' : 'showcase')}
           className={clsx(
             "w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-3 transition-colors",
             viewMode === 'showcase'

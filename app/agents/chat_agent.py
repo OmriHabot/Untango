@@ -16,7 +16,7 @@ from google import genai
 from google.genai import types
 
 from ..models import ChatRequest, ChatResponse, TokenUsage, ToolCall
-from ..tools.filesystem import read_file
+from ..tools.filesystem import read_file, list_files
 from ..search import perform_hybrid_search
 from ..active_repo_state import active_repo_state
 
@@ -83,11 +83,25 @@ def rag_search(query: str) -> str:
     except Exception as e:
         return f"RAG search failed: {e}"
 
+def list_files_wrapper(directory: str = ".") -> str:
+    """
+    List files and subdirectories in a directory.
+    Args:
+        directory: Relative path within the repo (default is root).
+    """
+    try:
+        base_path = get_active_repo_path()
+        full_path = os.path.join(base_path, directory)
+        return list_files(full_path)
+    except Exception as e:
+        return f"Error listing files: {e}"
+
 # Map tools to functions
 # Map tools to functions
 tools_map = {
     "rag_search": rag_search,
     "read_file": read_file_wrapper,
+    "list_files": list_files_wrapper,
     "get_active_repo_path": get_active_repo_path,
     # get_system_instruction will be added after definition
 }
@@ -108,14 +122,25 @@ rag_tool = types.Tool(
         ),
         types.FunctionDeclaration(
             name="read_file",
-            description="Read the content of a file.",
+            description="Read the full content of a file. Use this to examine source code, configs, or any text file.",
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
-                    "filepath": types.Schema(type=types.Type.STRING, description="Path to the file"),
+                    "filepath": types.Schema(type=types.Type.STRING, description="Relative path to the file from repo root"),
                     "max_lines": types.Schema(type=types.Type.INTEGER, description="Max lines to read (default 500)")
                 },
                 required=["filepath"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="list_files",
+            description="List all files and subdirectories in a directory. Use this to explore the repository structure and find files to investigate.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "directory": types.Schema(type=types.Type.STRING, description="Relative path to directory (default: repo root)")
+                },
+                required=[]
             )
         ),
         types.FunctionDeclaration(
@@ -156,55 +181,111 @@ def get_system_instruction(context_str: str, repo_name: str) -> str:
     """Generate the system instruction with context and CoT protocol."""
     return f"""You are an expert software developer and coding assistant for the '{repo_name}' repository.
 You have full access to the source code of '{repo_name}' and are answering questions specifically about it.
-The dependency and information about the environment is provided below.
 
 === AUTOMATED CONTEXT ===
 {context_str}
 =========================
 
-IMPORTANT: You have access to powerful tools and you MUST use them proactively:
-- rag_search: Search the codebase semantically for code logic, functions, and classes
-- read_file: Read file contents directly
-- get_system_instruction: View your own system instructions
-- get_active_repo_path: Check which repository is active
-- get_context_report: Get the automated context report (Environment, Repository, Dependencies)
+=== MANDATORY FIRST STEP ===
 
-NOTE: The file structure is already provided in the "Automated Context" above. You do NOT need to list files to explore the directory structure.
+**ALWAYS call `list_files()` FIRST before doing anything else!**
+This gives you a complete view of all files in the repository.
+Then drill into subdirectories with `list_files("subdir")` as needed.
 
-CHAIN OF THOUGHT PROTOCOL (REQUIRED):
-When you receive a user request, you must follow this reasoning process internally before answering:
+=== YOUR TOOLS (USE THEM!) ===
 
-1. **Analyze Request**: What is the user asking? What specific information is needed?
-2. **Check Context**: Look at the "Automated Context" above. 
-   - Do I already know the OS, Python version, or Dependencies?
-   - Do I see the file structure?
-   - If yes, use that information directly.
-3. **Check Sufficiency**: Do I have enough information to answer *completely*?
-   - If the user asks about code logic, do I have the code? -> No, use `rag_search`.
-   - If the user asks about a specific file, do I have its content? -> No, use `read_file`.
-   - If the user asks about "versions", do I need to check for mismatches? -> Yes, check Context + Last Updated Date.
-4. **Formulate Plan**:
-   - If information is missing, CALL A TOOL.
-   - Do NOT ask the user for information you can find yourself.
-   - Do NOT answer with "I don't know" without trying to search first.
+You have access to these tools to explore and understand the codebase. Use them liberally!
 
-VERSION INFERENCE (CRITICAL):
-If the "Automated Context" shows dependencies without versions (e.g. just "pandas"), you MUST:
-1. Check the "Last Updated" date in the [Repository] section.
-2. Infer the likely version based on that date (e.g., Repo from 2021 likely uses pandas 1.x).
-3. Compare this with the user's installed version.
-4. WARN the user if there is a significant time gap (e.g., "Repo is from 2021 but you have pandas 2.2 installed. This may cause breaking changes.").
+**1. list_files(directory=".")**
+   - Lists all files and subdirectories in a directory
+   - ALWAYS call this first to see the full repo structure
+   - Then drill into subdirectories: `list_files("src")`, `list_files("tests")`, etc.
 
-STRATEGIC SEARCH HEURISTICS:
-- **Server configuration**: Look at `main.py` or `config.py`.
-- **API endpoints**: Search for `@app.post` / `@app.get`.
-- **Data models**: Check `models.py`.
-- **Business logic**: Use `rag_search`.
+**2. read_file(filepath, max_lines=500)**  
+   - Reads the full content of any file
+   - Use this to examine source code, configs, README, etc.
+   - Path is relative to repo root (e.g., "src/main.py")
+   - USE THIS LIBERALLY - read every file you're curious about
 
-Use `read_file` to inspect actual source code rather than relying only on `rag_search`.
-Prefer reading entry point files (`main.py`, `__init__.py`) completely to understand structure.
+**3. rag_search(query)**
+   - Semantic search across the entire codebase
+   - Best for finding: function implementations, class definitions, usage patterns
+   - Example queries: "how is authentication handled", "database connection", "error handling"
 
-Only ask the user for clarification if the question is genuinely ambiguous after you have tried to investigate.
+**4. get_context_report()**
+   - Returns environment info (OS, Python version), repo structure, and dependencies
+   - Already provided above, but call this if you need a refresh
+
+**5. get_active_repo_path()**
+   - Returns the absolute filesystem path to the repository
+   - Useful if you need to understand file paths
+
+=== EXPLORATION WORKFLOW ===
+
+When answering any question, follow this EXACT workflow:
+
+1. **FIRST: Call `list_files()`** (MANDATORY!)
+   - This shows you ALL files in the repository root
+   - Then call `list_files("subdir")` for any interesting subdirectories
+
+2. **Read entry points**:
+   - main.py, app.py, index.js, __init__.py
+   - README.md for project overview
+   - config.py, settings.py for configuration
+
+3. **Follow the trail**:
+   - When you see imports, read those files too
+   - When you find a function call, search for its definition
+   - When you see a class, read its full implementation
+
+4. **Search for patterns**:
+   - Use `rag_search` to find all usages of a function/class
+   - Search for error messages, config keys, API endpoints
+
+5. **Read related files**:
+   - Tests often reveal expected behavior
+   - Documentation files explain intent
+   - Config files reveal available options
+
+=== KEEP EXPLORING UNTIL SATISFIED ===
+
+If you check a directory or file and don't find what you need:
+- **Try another directory** - keep calling `list_files()` on different folders
+- **Try a different search query** - rephrase and use `rag_search` again
+- **Read more files** - the answer might be in a related file you haven't checked
+- **Don't give up early** - explore until you have enough information
+
+You have unlimited tool calls. Use them! Keep exploring until you're confident in your answer.
+
+=== CRITICAL RULES ===
+
+**DO:**
+- Use `read_file` on EVERY file you're curious about
+- Use `list_files` to explore unfamiliar directories
+- Use `rag_search` to find function/class usages
+- Read MORE files rather than fewer
+- Follow import chains completely
+
+**DON'T:**
+- NEVER answer "I don't have access to..." - you DO have access, use the tools!
+- NEVER say "I would need to see..." - just go read it!
+- NEVER guess what a file contains - read it!
+- NEVER assume based on filename alone - read it!
+- NEVER give incomplete answers when you could read one more file
+
+=== SELF-CHECK BEFORE ANSWERING ===
+
+Before writing your final answer, ask yourself:
+1. "Have I seen the actual code, or am I guessing?"
+2. "Is there another file I should check?"
+3. "Did I follow all the imports?"
+4. "Would reading one more file improve my answer?"
+
+If YES to any of these → investigate more first!
+
+=== VERSION INFERENCE ===
+If dependencies lack versions, check the "Last Updated" date and infer versions accordingly.
+WARN the user if there's a significant time gap between repo age and their current packages.
 """
 
 def get_system_instruction_wrapper(context_details: str = "") -> str:

@@ -19,7 +19,7 @@ IGNORE_DIRS = {
     '.git', '__pycache__', '.venv', 'venv', 'node_modules', '.idea', '.vscode', 'data',
     'tests', 'test', 'docs', 'doc', 'benchmarks', 'examples', 'samples', 'build', 'dist', 'site-packages', 'repos'
 }
-EXTENSIONS = {'.py', '.md'}
+EXTENSIONS = {'.py', '.md', '.ipynb'}
 
 class IngestManager:
     def __init__(self, repo_path: str = ".", repo_id: str = "default", repo_name: str = "Untango"):
@@ -220,9 +220,54 @@ class IngestManager:
             delete_file_chunks(rel_path)
             
             # Chunking (CPU bound)
+            # Chunking (CPU bound)
             if rel_path.endswith('.py'):
                 # Run CPU-bound chunking in executor
                 chunks = await loop.run_in_executor(None, chunk_python_code, code, rel_path, self.repo_name)
+            elif rel_path.endswith('.ipynb'):
+                # Handle notebooks by converting to simple text rep
+                try:
+                    nb = json.loads(code)
+                    cells = []
+                    for cell in nb.get('cells', []):
+                        cell_type = cell.get('cell_type', '')
+                        source = ''.join(cell.get('source', []))
+                        if source.strip():
+                            if cell_type == 'code':
+                                cells.append(f"```python\n{source}\n```")
+                            elif cell_type == 'markdown':
+                                cells.append(source)
+                    
+                    nb_content = "\n\n".join(cells)
+                    chunks = [{
+                        "id": f"{rel_path}::notebook::0",
+                        "content": nb_content,
+                        "metadata": {
+                            "filepath": rel_path,
+                            "repo_id": self.repo_id,
+                            "repo_name": self.repo_name,
+                            "chunk_type": "notebook",
+                            "start_line": 1,
+                            "end_line": len(nb_content.splitlines()),
+                            "imports": ""
+                        }
+                    }]
+                except Exception as e:
+                    logger.warning(f"Failed to parse notebook {rel_path}: {e}")
+                    # Fallback to treating as text
+                    chunks = [{
+                        "id": f"{rel_path}::text::0",
+                        "content": code,
+                        "metadata": {
+                            "filepath": rel_path,
+                            "repo_id": self.repo_id,
+                            "repo_name": self.repo_name,
+                            "chunk_type": "text",
+                            "start_line": 1,
+                            "end_line": len(code.splitlines()),
+                            "imports": ""
+                        }
+                    }]
             else:
                 chunks = [{
                     "id": f"{rel_path}::text::0",
