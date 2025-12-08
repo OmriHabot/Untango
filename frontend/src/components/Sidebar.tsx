@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useRepoStore } from '../store/repoStore';
 import { useChatStore } from '../store/chatStore';
-import { Plus, Database, Loader2, CheckCircle, XCircle, GitBranch } from 'lucide-react';
+import { Plus, Database, Loader2, CheckCircle, XCircle, GitBranch, Presentation } from 'lucide-react';
 import clsx from 'clsx';
 import { IngestModal } from './IngestModal';
 
 export const Sidebar: React.FC = () => {
-  const { repositories, activeRepoId, fetchRepositories, setActiveRepo, checkActiveRepo, ingestionStatuses } = useRepoStore();
+  const { repositories, activeRepoId, fetchRepositories, setActiveRepo, checkActiveRepo, ingestionStatuses, viewMode, setViewMode } = useRepoStore();
   const { messages, sendMessage, isLoading: isChatLoading, loadHistory } = useChatStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -43,6 +43,21 @@ export const Sidebar: React.FC = () => {
         </button>
       </div>
 
+      <div className="p-2 border-b border-slate-800">
+        <button
+          onClick={() => setViewMode('showcase')}
+          className={clsx(
+            "w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-3 transition-colors",
+            viewMode === 'showcase'
+              ? "bg-purple-600 text-white shadow-lg shadow-purple-900/20" 
+              : "bg-slate-800/50 text-purple-400 hover:bg-slate-800 hover:text-purple-300"
+          )}
+        >
+          <Presentation className="w-4 h-4" />
+          <span className="font-semibold">Showcase</span>
+        </button>
+      </div>
+
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         <div className="px-2 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">
           Repositories
@@ -63,7 +78,10 @@ export const Sidebar: React.FC = () => {
           return (
             <button
               key={repo.repo_id}
-              onClick={() => setActiveRepo(repo.repo_id)}
+              onClick={() => {
+                setActiveRepo(repo.repo_id);
+                setViewMode('chat');
+              }}
               className={clsx(
                 "w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-3 transition-colors",
                 isActive 

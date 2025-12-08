@@ -1,0 +1,21 @@
+{
+  "timestamp": 1765155479.0997279,
+  "dataset_size": 15,
+  "metrics": {
+    "hybrid": {
+      "avg_latency": 3.9636647701263428,
+      "avg_hit_rate": 1.0,
+      "avg_mrr": 0.8611111111111112
+    },
+    "vector": {
+      "avg_latency": 4.4589451313018795,
+      "avg_hit_rate": 1.0,
+      "avg_mrr": 0.9222222222222223
+    },
+    "bm25": {
+      "avg_latency": 0.0,
+      "avg_hit_rate": 0.0,
+      "avg_mrr": 0.0
+    }
+  }
+}

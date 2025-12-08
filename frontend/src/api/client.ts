@@ -13,6 +13,8 @@ export interface Repository {
   repo_id: string;
   name: string;
   path: string;
+  source_location?: string;
+  source_type?: string;
 }
 
 export interface ListRepositoriesResponse {
@@ -91,6 +93,22 @@ export const api = {
 
   clearChatHistory: async () => {
     const response = await client.delete(`${API_URL}/chat/history`);
+    return response.data;
+  },
+  
+  // Showcase / Debug API
+  debugChunkCode: async (code: string) => {
+    const response = await client.post('/api/debug/chunk', { code });
+    return response.data;
+  },
+  
+  debugSearchExplain: async (query: string) => {
+    const response = await client.post('/api/debug/search-explain', { query, n_results: 5 });
+    return response.data;
+  },
+
+  getReadme: async () => {
+    const response = await client.get<{ content: string }>('/api/docs/readme');
     return response.data;
   }
 };

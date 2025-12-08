@@ -50,6 +50,30 @@ source .venv/bin/activate
 
 The backend will automatically detect MPS availability and use it for embedding generation.
 
+## Running with Remote ChromaDB (GCP)
+
+To run the backend connected to a remote ChromaDB instance on Google Cloud Platform (e.g., running on Cloud Run), use the `docker-compose.gcp.yaml` configuration.
+
+### 1. Prerequisites
+- A **ChromaDB instance** running on GCP (e.g., deployed to Cloud Run using the `chromadb/chroma` image).
+- **Service Account Key**: Ensure `service-account-key.json` is configured (see GCP Setup section).
+
+### 2. Configuration
+Set the connection details for your remote ChromaDB instance:
+
+```bash
+export CHROMA_HOST="your-chroma-service-url.a.run.app" # The URL of your ChromaDB service
+export CHROMA_PORT="443"                                # Usually 443 for Cloud Run (HTTPS)
+```
+
+### 3. Run the Container
+
+```bash
+docker-compose -f docker-compose.gcp.yaml up --build
+```
+
+This starts the `rag-backend` service with Google IAM authentication enabled for ChromaDB (`CHROMA_AUTH_PROVIDER=google_iam`).
+
 ## API Endpoints
 
 | Endpoint | Method | Description |

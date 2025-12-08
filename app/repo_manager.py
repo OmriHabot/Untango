@@ -268,11 +268,21 @@ class RepositoryManager:
                 if name == "Unknown":
                     name = repo_id
                 
+                # Enhanced metadata
+                source_location = metadata.get("source_location")
+                source_type = metadata.get("source_type", "local")
+                
+                logger.info(f"Found repo: {name} (ID: {repo_id}, Source: {source_location})")
+                
                 repos.append({
                     "repo_id": repo_id,
                     "name": name,
-                    "path": repo_path
+                    "path": repo_path,
+                    "source_location": source_location,
+                    "source_type": source_type
                 })
+        
+        logger.info(f"Total repositories found: {len(repos)}")
         return repos
 
     def save_runbook(self, repo_id: str, content: str):

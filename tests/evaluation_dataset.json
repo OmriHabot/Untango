@@ -1,0 +1,195 @@
+[
+    {
+        "id": "q1",
+        "query": "How is the hybrid search implemented?",
+        "expected_chunks": [
+            "perform_hybrid_search",
+            "rank_bm25"
+        ],
+        "keywords": [
+            "bm25",
+            "vector",
+            "fusion",
+            "rrf"
+        ]
+    },
+    {
+        "id": "q2",
+        "query": "What logic handles the code chunking?",
+        "expected_chunks": [
+            "chunk_python_code",
+            "AST",
+            "RecursiveCharacterTextSplitter"
+        ],
+        "keywords": [
+            "ast",
+            "parse",
+            "chunker"
+        ]
+    },
+    {
+        "id": "q3",
+        "query": "Explain how the RAG pipeline is structured in the backend.",
+        "expected_chunks": [
+            "query_db",
+            "RAGQueryRequest",
+            "vertex"
+        ],
+        "keywords": [
+            "retrieve",
+            "generate",
+            "confidence",
+            "threshold"
+        ]
+    },
+    {
+        "id": "q4",
+        "query": "How does the system calculate similarity scores from distance?",
+        "expected_chunks": [
+            "distance_to_similarity",
+            "cosine"
+        ],
+        "keywords": [
+            "distance",
+            "metric",
+            "score"
+        ]
+    },
+    {
+        "id": "q5",
+        "query": "Where is the background ingestion task defined?",
+        "expected_chunks": [
+            "ingest_repo_background",
+            "ingest_repository_endpoint"
+        ],
+        "keywords": [
+            "background",
+            "task",
+            "ingest"
+        ]
+    },
+    {
+        "id": "q6",
+        "query": "What metadata is stored with each code chunk?",
+        "expected_chunks": [
+            "ChunkMetadata",
+            "chunk_python_code"
+        ],
+        "keywords": [
+            "filepath",
+            "start_line",
+            "end_line",
+            "class_name"
+        ]
+    },
+    {
+        "id": "q7",
+        "query": "How are imports handled during chunking?",
+        "expected_chunks": [
+            "chunk_python_code"
+        ],
+        "keywords": [
+            "import",
+            "alias",
+            "module"
+        ]
+    },
+    {
+        "id": "q8",
+        "query": "How does the chat stream endpoint work?",
+        "expected_chunks": [
+            "chat_stream_endpoint",
+            "StreamingResponse"
+        ],
+        "keywords": [
+            "stream",
+            "yield",
+            "json"
+        ]
+    },
+    {
+        "id": "q9",
+        "query": "What function generates the runbook content?",
+        "expected_chunks": [
+            "generate_runbook",
+            "runbook_generator"
+        ],
+        "keywords": [
+            "orchestrate",
+            "scan",
+            "map"
+        ]
+    },
+    {
+        "id": "q10",
+        "query": "How is code tokenized for BM25?",
+        "expected_chunks": [
+            "tokenize_code"
+        ],
+        "keywords": [
+            "alphanumeric",
+            "lowercase",
+            "split"
+        ]
+    },
+    {
+        "id": "q11",
+        "query": "What are the allowed origins for CORS?",
+        "expected_chunks": [
+            "add_middleware",
+            "CORSMiddleware"
+        ],
+        "keywords": [
+            "localhost",
+            "5173"
+        ]
+    },
+    {
+        "id": "q12",
+        "query": "How can I delete the entire vector collection?",
+        "expected_chunks": [
+            "delete_collection"
+        ],
+        "keywords": [
+            "delete",
+            "caution"
+        ]
+    },
+    {
+        "id": "q13",
+        "query": "What model handles the chat history state?",
+        "expected_chunks": [
+            "chat_history_manager",
+            "ChatRequest"
+        ],
+        "keywords": [
+            "history",
+            "context",
+            "session"
+        ]
+    },
+    {
+        "id": "q14",
+        "query": "How does the chunker handle class methods?",
+        "expected_chunks": [
+            "chunk_python_code"
+        ],
+        "keywords": [
+            "ClassDef",
+            "FunctionDef",
+            "method"
+        ]
+    },
+    {
+        "id": "q15",
+        "query": "What is the specialized endpoint for debugging hybrid vs vector search?",
+        "expected_chunks": [
+            "debug_search_explain"
+        ],
+        "keywords": [
+            "debug",
+            "explain",
+            "fusion"
+        ]
+    }
+]

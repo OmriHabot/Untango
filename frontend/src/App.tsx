@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea } from './components/ChatArea';
+import { RubricShowcase } from './components/RubricShowcase';
 import { useRepoStore } from './store/repoStore';
 
 function App() {
@@ -10,7 +11,9 @@ function App() {
     <div className="flex h-screen bg-slate-950 text-slate-200 font-sans">
       <Sidebar />
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        {activeRepoId ? (
+        {useRepoStore((s) => s.viewMode) === 'showcase' ? (
+          <RubricShowcase />
+        ) : activeRepoId ? (
           <ChatArea />
         ) : (
           <div className="flex-1 flex items-center justify-center text-slate-500 flex-col gap-4">

@@ -11,6 +11,9 @@ interface RepoState {
   setActiveRepo: (repoId: string) => Promise<void>;
   checkActiveRepo: () => Promise<void>;
   pollStatus: (repoId: string) => Promise<void>;
+  
+  viewMode: 'chat' | 'showcase';
+  setViewMode: (mode: 'chat' | 'showcase') => void;
 }
 
 export const useRepoStore = create<RepoState>((set, get) => ({
@@ -18,6 +21,9 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   activeRepoId: null,
   isLoading: false,
   ingestionStatuses: {},
+  viewMode: 'chat',
+
+  setViewMode: (mode) => set({ viewMode: mode }),
 
   fetchRepositories: async () => {
     set({ isLoading: true });

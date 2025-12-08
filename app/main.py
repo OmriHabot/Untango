@@ -4,9 +4,10 @@ FastAPI application for RAG backend with ChromaDB and Vertex AI.
 import logging
 import os
 import json
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Body
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List, Dict, Any, Optional
 
 from .models import (
     CodeIngestRequest,
@@ -44,7 +45,8 @@ from .chunker import chunk_python_code
 from .ingest_manager import ingest_manager, IngestManager
 from .repo_manager import repo_manager, RepositoryContext
 from .active_repo_state import active_repo_state
-from .search import perform_hybrid_search
+from .search import perform_hybrid_search, perform_vector_search, tokenize_code
+from rank_bm25 import BM25Okapi
 from .logger import setup_logging, get_logger
 from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
 from .chat_history import chat_history_manager
@@ -293,11 +295,17 @@ async def query_db(request: RAGQueryRequest) -> RAGQueryResponse:
             )
         
         # Step 1: Perform hybrid search to retrieve relevant chunks with optional thresholds
+        # Get active repo to scope search
+        active_repo_id = active_repo_state.get_active_repo_id()
+        # If default, pass None to search all (or handle as preferred)
+        repo_id_filter = active_repo_id if active_repo_id and active_repo_id != "default" else None
+
         hybrid_results = perform_hybrid_search(
             request.query,
             request.n_results,
             vector_similarity_threshold=request.vector_similarity_threshold,
-            bm25_score_threshold=request.bm25_score_threshold
+            bm25_score_threshold=request.bm25_score_threshold,
+            repo_id=repo_id_filter
         )
         logger.info(
             "Hybrid retrieval returned %d chunk(s) for RAG query",
@@ -827,13 +835,88 @@ async def ingest_repository_endpoint(
             source_type=repo_context.source_type,
             source_location=repo_context.source_location,
             local_path=repo_context.repo_path,
-            dependencies=repo_context.dependencies,
-            file_count=file_count,
+            dependencies=[],
+            file_count=0,
             status="pending"
         )
     except Exception as e:
-        logger.exception("Repository ingestion failed")
-        raise HTTPException(status_code=500, detail=f"Failed to ingest repository: {str(e)}")
+        logger.exception("Failed to initiate repository ingestion")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- DEBUG / SHOWCASE ENDPOINTS ---
+
+@app.post("/api/debug/chunk")
+async def debug_chunk_code(code: str = Body(..., embed=True)):
+    """Debug endpoint to visualize how code splits into AST chunks"""
+    try:
+        # We perform chunking but don't save to DB
+        chunks = chunk_python_code(code, "debug_file.py", "debug_repo")
+        return {"chunks": chunks}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/debug/search-explain")
+async def debug_search_explain(request: QueryRequest):
+    """
+    Debug endpoint that returns intermediate search components
+    (Vector results AND BM25 results independently) to visualize the hybrid fusion.
+    """
+    try:
+        # 1. Vector Only
+        vector_results = perform_vector_search(
+             request.query, 
+             request.n_results, 
+             similarity_threshold=0.0 # Get everything
+        )
+        
+        # Format vector results for frontend
+        formatted_vector = []
+        if vector_results.get("ids") and vector_results["ids"][0]:
+            for i, doc_id in enumerate(vector_results["ids"][0]):
+                formatted_vector.append({
+                    "id": doc_id,
+                    "content": vector_results["documents"][0][i],
+                    "score": 1.0 - vector_results["distances"][0][i], # similarity
+                    "metadata": vector_results["metadatas"][0][i]
+                })
+
+        # 2. BM25 Only (Manual simulation since logic is inside search.py)
+        # We'll rely on the fact that perform_hybrid_search does RRF, but to show "raw" BM25 
+        # we honestly need to expose that logic. For now, let's use perform_hybrid_search
+        # and extract the fields "bm25_rank" / "rrf_bm25" which populates "bm25_score"
+        
+        hybrid_results = perform_hybrid_search(
+            request.query,
+            request.n_results * 2, # Get more candidate to show merging
+            vector_similarity_threshold=0.0,
+            bm25_score_threshold=0.0
+        )
+        
+        return {
+            "vector_component": formatted_vector[:request.n_results],
+            "hybrid_component": hybrid_results[:request.n_results]
+        }
+    except Exception as e:
+        logger.exception("Debug search explain failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/docs/readme")
+async def get_readme():
+    """Returns the project README.md content"""
+    try:
+        # Assuming README.md is in the project root found via repo_manager or relative path
+        # Since we are in app/main.py, project root is one level up
+        readme_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "README.md")
+        if os.path.exists(readme_path):
+            with open(readme_path, "r") as f:
+                content = f.read()
+            return {"content": content}
+        else:
+            return {"content": "# README.md not found"}
+    except Exception as e:
+        logger.exception("Failed to read README")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/repository/{repo_id}/status")

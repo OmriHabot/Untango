@@ -8,6 +8,7 @@ import clsx from 'clsx';
 
 interface Props {
   message: Message;
+  showAvatar?: boolean;
 }
 
 const ToolCallDisplay: React.FC<{ toolCall: ToolCall }> = ({ toolCall }) => {
@@ -87,17 +88,19 @@ const MarkdownContent: React.FC<{ content: string }> = React.memo(({ content }) 
   </div>
 ));
 
-export const MessageBubble: React.FC<Props> = ({ message }) => {
+export const MessageBubble: React.FC<Props> = ({ message, showAvatar = true }) => {
   const isUser = message.role === 'user';
 
   return (
     <div className={clsx("flex gap-4 mb-6", isUser ? "flex-row-reverse" : "flex-row")}>
-      <div className={clsx(
-        "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
-        isUser ? "bg-blue-600" : "bg-purple-600"
-      )}>
-        {isUser ? <User className="w-5 h-5 text-white" /> : <Bot className="w-5 h-5 text-white" />}
-      </div>
+      {showAvatar && (
+        <div className={clsx(
+          "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
+          isUser ? "bg-blue-600" : "bg-purple-600"
+        )}>
+          {isUser ? <User className="w-5 h-5 text-white" /> : <Bot className="w-5 h-5 text-white" />}
+        </div>
+      )}
 
       <div className={clsx("flex-1 max-w-3xl min-w-0", isUser ? "items-end flex flex-col" : "")}>
         <div className={clsx(

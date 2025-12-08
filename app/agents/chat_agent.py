@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from google import genai
 from google.genai import types
 
-from ..models import ChatRequest, ChatResponse, TokenUsage
+from ..models import ChatRequest, ChatResponse, TokenUsage, ToolCall
 from ..tools.filesystem import read_file
 from ..search import perform_hybrid_search
 from ..active_repo_state import active_repo_state
@@ -267,10 +267,12 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         # Handle tool calls (multi-turn loop)
         # We'll allow a max of 15 tool turns to prevent infinite loops
         max_turns = 15
-        current_turn = 0
+        # Capture tool calls for trace
+        tool_calls: List[ToolCall] = []
         
         final_response_text = ""
         usage = None
+        current_turn = 0
 
         while current_turn < max_turns:
             # Check if model wants to call a function
@@ -332,6 +334,15 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
                         response={"result": result}
                     )
                 )
+
+                # Add to trace
+                tool_call_obj = ToolCall(
+                    tool=fn_name,
+                    args=args_dict if 'args_dict' in locals() else {k:v for k,v in fn_args.items()},
+                    result=str(result),
+                    status="completed"
+                )
+                tool_calls.append(tool_call_obj)
             
             # Send tool outputs back to model
             contents.append(types.Content(role="user", parts=tool_outputs))
@@ -364,6 +375,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         return ChatResponse(
             status="success",
             response=final_response_text or "I'm sorry, I couldn't generate a response after multiple attempts.",
+            trace=[t.model_dump() for t in tool_calls] if tool_calls else [],
             usage=usage
         )
 

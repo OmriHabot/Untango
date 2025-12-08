@@ -15,7 +15,7 @@ class CodeIngestRequest(BaseModel):
 class QueryRequest(BaseModel):
     """Request model for querying the vector db"""
     query: str = Field(..., description="Search query text")
-    n_results: int = Field(default=5, ge=1, le=50, description="Number of results to return")
+    n_results: int = Field(default=5, ge=1, description="Number of results to return")
     vector_similarity_threshold: Optional[float] = Field(
         default=0.2,
         ge=0.0,
@@ -82,7 +82,7 @@ class HealthResponse(BaseModel):
 class RAGQueryRequest(BaseModel):
     """Request model for RAG query with retrieval + inference"""
     query: str = Field(..., description="User question to answer using RAG", min_length=1)
-    n_results: int = Field(default=10, ge=1, le=50, description="Number of chunks to retrieve for ranking")
+    n_results: int = Field(default=10, ge=1, description="Number of chunks to retrieve for ranking")
     confidence_threshold: float = Field(default=0.010, ge=0.0, le=1.0, description="Minimum combined confidence score")
     vector_similarity_threshold: Optional[float] = Field(
         default=None,
@@ -187,6 +187,7 @@ class ChatResponse(BaseModel):
     """Response model for chat"""
     status: str
     response: str
+    trace: Optional[List[Dict[str, Any]]] = None
     usage: Optional[TokenUsage] = None
 
 
