@@ -1,9 +1,11 @@
 import argparse
 import json
 import time
+import math
 import httpx
 import statistics
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from scipy import stats as scipy_stats
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
@@ -71,7 +73,7 @@ def evaluate_retrieval(retrieved_chunks: List[Dict], expected_keywords: List[str
         "mrr": ranks[0] if ranks else 0.0
     }
 
-def run_evaluation_suite(dataset: List[Dict], suite_name: str, description: str, config: Dict[str, Any]) -> Dict[str, float]:
+def run_evaluation_suite(dataset: List[Dict], suite_name: str, description: str, config: Dict[str, Any]) -> Dict[str, Any]:
     console.print(Panel(Text(suite_name, style="bold magenta"), title="Running Suite", border_style="magenta", expand=False))
     console.print(Markdown(description))
     console.print()
@@ -80,6 +82,13 @@ def run_evaluation_suite(dataset: List[Dict], suite_name: str, description: str,
         "latencies": [],
         "hit_rates": [],
         "mrrs": []
+    }
+    
+    # Error tracking for analysis
+    errors = {
+        "no_results": [],
+        "api_error": [],
+        "timeout": []
     }
     
     with httpx.Client() as client:
@@ -97,6 +106,15 @@ def run_evaluation_suite(dataset: List[Dict], suite_name: str, description: str,
                 rag_out = run_rag_query(item['query'], client, config)
                 
                 if not rag_out["success"]:
+                    # Track error type
+                    error_msg = rag_out.get("error", "unknown")
+                    if "timeout" in error_msg.lower():
+                        errors["timeout"].append({"query": item['query'], "error": error_msg})
+                    elif "no results" in error_msg.lower():
+                        errors["no_results"].append({"query": item['query'], "error": error_msg})
+                    else:
+                        errors["api_error"].append({"query": item['query'], "error": error_msg})
+                    
                     # Penalize failures
                     metrics["hit_rates"].append(0.0)
                     metrics["mrrs"].append(0.0)
@@ -111,15 +129,60 @@ def run_evaluation_suite(dataset: List[Dict], suite_name: str, description: str,
                     metrics["mrrs"].append(retrieval_scores["mrr"])
                 
                 progress.advance(task)
-            
+    
+    # Calculate comprehensive statistics
+    def calc_stats(values: List[float]) -> Dict[str, float]:
+        if not values:
+            return {"mean": 0.0, "std": 0.0, "ci_95_lower": 0.0, "ci_95_upper": 0.0}
+        
+        n = len(values)
+        mean = statistics.mean(values)
+        
+        if n < 2:
+            return {"mean": mean, "std": 0.0, "ci_95_lower": mean, "ci_95_upper": mean}
+        
+        std = statistics.stdev(values)
+        
+        # 95% CI using t-distribution
+        se = std / math.sqrt(n)
+        t_value = scipy_stats.t.ppf(0.975, n - 1)  # 95% CI, two-tailed
+        ci_margin = t_value * se
+        
+        return {
+            "mean": mean,
+            "std": std,
+            "ci_95_lower": mean - ci_margin,
+            "ci_95_upper": mean + ci_margin
+        }
+    
+    latency_stats = calc_stats(metrics["latencies"])
+    hit_rate_stats = calc_stats(metrics["hit_rates"])
+    mrr_stats = calc_stats(metrics["mrrs"])
+    
     stats = {
-        "avg_latency": statistics.mean(metrics["latencies"]) if metrics["latencies"] else 0.0,
-        "avg_hit_rate": statistics.mean(metrics["hit_rates"]) if metrics["hit_rates"] else 0.0,
-        "avg_mrr": statistics.mean(metrics["mrrs"]) if metrics["mrrs"] else 0.0
+        # Legacy fields for backwards compatibility
+        "avg_latency": latency_stats["mean"],
+        "avg_hit_rate": hit_rate_stats["mean"],
+        "avg_mrr": mrr_stats["mean"],
+        # New statistical fields
+        "std_latency": latency_stats["std"],
+        "std_hit_rate": hit_rate_stats["std"],
+        "std_mrr": mrr_stats["std"],
+        "ci_95_hit_rate": (hit_rate_stats["ci_95_lower"], hit_rate_stats["ci_95_upper"]),
+        "ci_95_mrr": (mrr_stats["ci_95_lower"], mrr_stats["ci_95_upper"]),
+        "ci_95_latency": (latency_stats["ci_95_lower"], latency_stats["ci_95_upper"]),
+        # Sample size
+        "n_queries": len(dataset),
+        "n_successful": len(metrics["latencies"]),
+        # Error summary
+        "errors": {
+            "no_results": len(errors["no_results"]),
+            "api_error": len(errors["api_error"]),
+            "timeout": len(errors["timeout"]),
+            "details": errors
+        }
     }
     
-    # console.print(f"  Avg Hit Rate: {stats['avg_hit_rate']:.2%}")
-    # console.print(f"  Avg MRR:      {stats['avg_mrr']:.4f}")
     return stats
 
 def main():
@@ -229,11 +292,82 @@ def main():
 
     if args.output_file:
         try:
+            # Convert tuples to lists for JSON serialization
+            def serialize_stats(stats_dict):
+                serialized = {}
+                for k, v in stats_dict.items():
+                    if isinstance(v, tuple):
+                        serialized[k] = list(v)
+                    elif isinstance(v, dict):
+                        serialized[k] = serialize_stats(v)
+                    else:
+                        serialized[k] = v
+                return serialized
+            
+            serialized_data = {
+                "timestamp": results_data["timestamp"],
+                "dataset_size": results_data["dataset_size"],
+                "metrics": {k: serialize_stats(v) for k, v in results_data["metrics"].items()}
+            }
+            
             with open(args.output_file, 'w') as f:
-                json.dump(results_data, f, indent=2)
+                json.dump(serialized_data, f, indent=2)
             console.print(f"[bold green]Results saved to {args.output_file}[/bold green]")
         except Exception as e:
             console.print(f"[bold red]Error saving results: {e}[/bold red]")
+    
+    # Print statistical significance section if ablation was run
+    if args.ablation:
+        console.print()
+        console.print(Panel.fit(
+            "[bold cyan]Statistical Significance Analysis[/bold cyan]",
+            title="📊 Statistics",
+            border_style="cyan"
+        ))
+        
+        # Detailed statistics table
+        stats_table = Table(title="Detailed Statistics (Mean ± Std, 95% CI)", box=box.ROUNDED)
+        stats_table.add_column("Configuration", style="magenta")
+        stats_table.add_column("Hit Rate (Mean ± Std)", justify="center", style="green")
+        stats_table.add_column("Hit Rate 95% CI", justify="center", style="green")
+        stats_table.add_column("MRR (Mean ± Std)", justify="center", style="blue")
+        stats_table.add_column("MRR 95% CI", justify="center", style="blue")
+        
+        for name, s in [("Hybrid", hybrid_stats), ("Vector Only", vector_stats), ("BM25 Only", bm25_stats)]:
+            hr_ci = s.get("ci_95_hit_rate", (0, 0))
+            mrr_ci = s.get("ci_95_mrr", (0, 0))
+            stats_table.add_row(
+                name,
+                f"{s['avg_hit_rate']:.2%} ± {s.get('std_hit_rate', 0):.2%}",
+                f"[{hr_ci[0]:.2%}, {hr_ci[1]:.2%}]",
+                f"{s['avg_mrr']:.4f} ± {s.get('std_mrr', 0):.4f}",
+                f"[{mrr_ci[0]:.4f}, {mrr_ci[1]:.4f}]"
+            )
+        
+        console.print(stats_table)
+        console.print()
+        
+        # Error Analysis Summary
+        error_table = Table(title="Error Analysis Summary", box=box.SIMPLE)
+        error_table.add_column("Configuration", style="magenta")
+        error_table.add_column("Total Queries", justify="right")
+        error_table.add_column("Successful", justify="right", style="green")
+        error_table.add_column("No Results", justify="right", style="yellow")
+        error_table.add_column("API Errors", justify="right", style="red")
+        error_table.add_column("Timeouts", justify="right", style="red")
+        
+        for name, s in [("Hybrid", hybrid_stats), ("Vector Only", vector_stats), ("BM25 Only", bm25_stats)]:
+            errs = s.get("errors", {})
+            error_table.add_row(
+                name,
+                str(s.get("n_queries", 0)),
+                str(s.get("n_successful", 0)),
+                str(errs.get("no_results", 0)),
+                str(errs.get("api_error", 0)),
+                str(errs.get("timeout", 0))
+            )
+        
+        console.print(error_table)
 
 if __name__ == "__main__":
     main()
