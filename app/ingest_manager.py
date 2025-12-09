@@ -1,28 +1,28 @@
 """
 Ingest Manager
-Handles incremental ingestion of the repository into ChromaDB.
-Tracks file modification times to only re-ingest changed files.
+Handles ingestion of the repository into ChromaDB using upsert-based ingestion.
+Uses ChromaDB's upsert() method which handles both inserts and updates atomically,
+eliminating the need for separate delete operations.
 
 Optimized batching based on ChromaDB research:
 - ChromaDB default max batch: 41,666
-- SQLite rebalancing overhead scales with collection size
-- Conservative batch size of 30K prevents exponential slowdown
+- Conservative batch size of 30K prevents SQLite overhead
+- Upsert combines add/update in a single operation
 """
 import os
 import json
 import logging
 import asyncio
 import time
-from typing import Dict, Set
+from typing import Dict, Set, List, Any, Tuple
 
 from .chunker import chunk_python_code
-from .database import get_collection, get_collection_name, delete_file_chunks, get_embedding_function
+from .database import get_collection, delete_file_chunks
 
 logger = logging.getLogger(__name__)
 
 # Optimized batch sizing for ChromaDB ingestion
-CHROMADB_MAX_BATCH = 41_666  # ChromaDB default limit
-OPTIMAL_BATCH_SIZE = int(CHROMADB_MAX_BATCH * 0.9)  # ~37,500 with safety margin
+CHROMADB_MAX_BATCH = 41_666  # ChromaDB default limit [web:19]
 CONSERVATIVE_BATCH_SIZE = 30_000  # Proven fastest, avoids SQLite rebalancing overhead
 FILE_BATCH_SIZE = 50  # Concurrent file I/O batch size
 
@@ -36,6 +36,7 @@ IGNORE_DIRS = {
     'tests', 'test', 'docs', 'doc', 'benchmarks', 'examples', 'samples', 'build', 'dist', 'site-packages', 'repos'
 }
 EXTENSIONS = {'.py', '.md', '.ipynb'}
+
 
 class IngestManager:
     def __init__(self, repo_path: str = ".", repo_id: str = "default", repo_name: str = "Untango"):
@@ -67,13 +68,17 @@ class IngestManager:
     async def sync_repo(self):
         """
         Synchronize the repository with the vector database.
-        Only processes files that have changed since the last sync.
-        Uses batch processing for better performance.
+        Uses ChromaDB's upsert() method for efficient updates:
+        1. Collect all files that need processing
+        2. Generate ALL chunks upfront from all files
+        3. Batch upsert - ChromaDB handles embeddings and updates atomically
         """
-        logger.info("Starting smart ingestion sync...")
+        logger.info("Starting smart ingestion sync (ChromaDB upsert-based ingestion)...")
         
-        # 1. Identify files to process
-        files_to_process = []
+        # ============================================================
+        # PHASE 1: Identify files to process
+        # ============================================================
+        files_to_process: List[Tuple[str, str, float]] = []  # (filepath, rel_path, mtime)
         current_files: Set[str] = set()
         
         for root, dirs, files in os.walk(self.repo_path):
@@ -102,166 +107,178 @@ class IngestManager:
                 except Exception as e:
                     logger.error(f"Error checking file {rel_path}: {e}")
 
-        # 2. Handle deletions
+        # ============================================================
+        # PHASE 2: Handle deletions
+        # ============================================================
         changes_detected = 0
+        files_deleted = []
         for cached_file in list(self.cache.keys()):
             if cached_file not in current_files:
                 logger.info(f"File removed: {cached_file}")
-                try:
-                    delete_file_chunks(cached_file)
-                except Exception as e:
-                    logger.warning(f"Failed to delete chunks for {cached_file}: {e}")
+                files_deleted.append(cached_file)
                 del self.cache[cached_file]
                 changes_detected += 1
+        
+        # Batch delete chunks for removed files
+        collection = get_collection()
+        for filepath in files_deleted:
+            try:
+                # Query for chunks belonging to this file
+                results = collection.get(
+                    where={"filepath": filepath}
+                )
+                if results['ids']:
+                    collection.delete(ids=results['ids'])
+                    logger.info(f"Deleted {len(results['ids'])} chunks for {filepath}")
+            except Exception as e:
+                logger.warning(f"Failed to delete chunks for {filepath}: {e}")
 
-        # 3. Process updates in batches
-        if files_to_process:
-            logger.info(f"Found {len(files_to_process)} files to ingest.")
-            
-            # Get embedding function for explicit embedding generation
-            embedding_function = get_embedding_function()
-            
-            # Use conservative batch size to avoid SQLite rebalancing overhead
-            # Research shows 30K is optimal, respects ChromaDB limits with margin
-            target_batch_size = CONSERVATIVE_BATCH_SIZE
-            
-            # Accumulators for bulk insertion
-            pending_ids = []
-            pending_docs = []
-            pending_metas = []
-            pending_files = []  # (filepath, rel_path, mtime)
-            
-            # Performance monitoring
-            total_docs_processed = 0
-            batch_count = 0
-            ingestion_start_time = time.time()
-            
-            async def flush_batch():
-                nonlocal pending_ids, pending_docs, pending_metas, pending_files, changes_detected
-                nonlocal total_docs_processed, batch_count
-                if not pending_ids:
-                    return
+        if not files_to_process:
+            if changes_detected > 0:
+                self._save_cache()
+                logger.info(f"Cache saved. {changes_detected} files deleted, no new files to ingest.")
+            else:
+                logger.debug("No changes detected.")
+            return
 
-                batch_count += 1
-                batch_start = time.time()
-                batch_size = len(pending_docs)
+        logger.info(f"Found {len(files_to_process)} files to ingest.")
+        ingestion_start_time = time.time()
+
+        # ============================================================
+        # PHASE 3: Generate ALL chunks upfront from all files
+        # ============================================================
+        logger.info("Phase 3: Generating all chunks from files...")
+        
+        all_ids: List[str] = []
+        all_docs: List[str] = []
+        all_metas: List[Dict[str, Any]] = []
+        successfully_processed_files: List[Tuple[str, str, float]] = []
+        
+        # Process files in batches for I/O efficiency
+        total_file_batches = (len(files_to_process) + FILE_BATCH_SIZE - 1) // FILE_BATCH_SIZE
+        
+        for i in range(0, len(files_to_process), FILE_BATCH_SIZE):
+            batch = files_to_process[i:i + FILE_BATCH_SIZE]
+            file_batch_num = i // FILE_BATCH_SIZE + 1
+            
+            if file_batch_num % LOG_BATCH_INTERVAL == 0 or file_batch_num == 1:
+                logger.info(f"Chunking file batch {file_batch_num}/{total_file_batches}")
+            
+            # Process files concurrently
+            tasks = [self._generate_chunks_for_file(fp, rp) for fp, rp, _ in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Collect results
+            for j, result in enumerate(results):
+                file_info = batch[j]  # (filepath, rel_path, mtime)
                 
-                try:
-                    collection = get_collection()
+                if isinstance(result, Exception):
+                    logger.error(f"Failed to chunk {file_info[1]}: {result}")
+                    continue
                     
-                    # Generate embeddings explicitly using the batched function
-                    embed_start = time.time()
-                    embeddings = embedding_function(pending_docs)
-                    embed_time = time.time() - embed_start
+                if result:
+                    ids, docs, metas = result
+                    if ids:
+                        all_ids.extend(ids)
+                        all_docs.extend(docs)
+                        all_metas.extend(metas)
                     
-                    # Insert to ChromaDB
-                    insert_start = time.time()
-                    collection.add(
-                        ids=pending_ids,
-                        documents=pending_docs,
-                        embeddings=embeddings,
-                        metadatas=pending_metas
+                    # Track file as successfully processed
+                    successfully_processed_files.append(file_info)
+
+        total_chunks = len(all_ids)
+        chunk_time = time.time() - ingestion_start_time
+        logger.info(f"Generated {total_chunks} chunks from {len(successfully_processed_files)} files in {chunk_time:.2f}s")
+
+        if total_chunks == 0:
+            logger.info("No chunks generated, nothing to upsert.")
+            # Still update cache for processed files (they might be empty)
+            for filepath, rel_path, mtime in successfully_processed_files:
+                self.cache[rel_path] = mtime
+                changes_detected += 1
+            if changes_detected > 0:
+                self._save_cache()
+            return
+
+        # ============================================================
+        # PHASE 4: Batch upsert ALL chunks using ChromaDB's upsert()
+        # ============================================================
+        logger.info(f"Phase 4: Upserting {total_chunks} chunks using ChromaDB upsert()...")
+        
+        insert_start_time = time.time()
+        total_upserted = 0
+        batch_count = 0
+        
+        for i in range(0, total_chunks, CONSERVATIVE_BATCH_SIZE):
+            batch_ids = all_ids[i:i + CONSERVATIVE_BATCH_SIZE]
+            batch_docs = all_docs[i:i + CONSERVATIVE_BATCH_SIZE]
+            batch_metas = all_metas[i:i + CONSERVATIVE_BATCH_SIZE]
+            
+            batch_count += 1
+            batch_size = len(batch_ids)
+            batch_start = time.time()
+            
+            try:
+                # Use upsert() - atomically handles both inserts and updates
+                # If ID exists, updates it; if not, creates it [web:7][web:14]
+                collection.upsert(
+                    ids=batch_ids,
+                    documents=batch_docs,
+                    metadatas=batch_metas
+                    # NO embeddings parameter - ChromaDB generates them automatically
+                )
+                
+                batch_time = time.time() - batch_start
+                total_upserted += batch_size
+                
+                # Performance monitoring
+                if batch_count % LOG_BATCH_INTERVAL == 0 or batch_size > 1000:
+                    elapsed = time.time() - insert_start_time
+                    rate = total_upserted / elapsed if elapsed > 0 else 0
+                    
+                    logger.info(
+                        f"Batch {batch_count}: {batch_size} chunks upserted in {batch_time:.2f}s | "
+                        f"Total: {total_upserted}/{total_chunks} docs, Rate: {rate:.1f} docs/sec"
                     )
-                    insert_time = time.time() - insert_start
                     
-                    batch_time = time.time() - batch_start
-                    total_docs_processed += batch_size
-                    
-                    # Update cache for all successfully processed files
-                    processed_paths = set()
-                    for _, rp, mtime in pending_files:
-                        self.cache[rp] = mtime
-                        processed_paths.add(rp)
-                        
-                    changes_detected += len(processed_paths)
-                    
-                    # Performance monitoring - log every N batches or on large batches
-                    if batch_count % LOG_BATCH_INTERVAL == 0 or batch_size > 1000:
-                        elapsed = time.time() - ingestion_start_time
-                        rate = total_docs_processed / elapsed if elapsed > 0 else 0
-                        
-                        logger.info(
-                            f"Batch {batch_count}: {batch_size} chunks in {batch_time:.2f}s "
-                            f"(embed: {embed_time:.2f}s, insert: {insert_time:.2f}s) | "
-                            f"Total: {total_docs_processed} docs, Rate: {rate:.1f} docs/sec"
+                    # Warn if rate drops below expected threshold
+                    if rate < MIN_EXPECTED_RATE and total_upserted > 100:
+                        logger.warning(
+                            f"Ingestion rate ({rate:.1f} docs/sec) below threshold ({MIN_EXPECTED_RATE}). "
+                            "Check: SQLite locks, memory pressure, or embedding model bottleneck."
                         )
                         
-                        # Warn if rate drops below expected threshold
-                        if rate < MIN_EXPECTED_RATE and total_docs_processed > 100:
-                            logger.warning(
-                                f"Ingestion rate ({rate:.1f} docs/sec) below threshold ({MIN_EXPECTED_RATE}). "
-                                "Check: SQLite locks, memory pressure, or embedding model bottleneck."
-                            )
-                    
-                except Exception as e:
-                    logger.error(f"Failed to insert batch {batch_count} ({batch_size} chunks) to ChromaDB: {e}")
-                    # In a real system, we might want to retry or handle partial failures
-                
-                # Reset accumulators
-                pending_ids = []
-                pending_docs = []
-                pending_metas = []
-                pending_files = []
+            except Exception as e:
+                logger.error(f"Failed to upsert batch {batch_count} ({batch_size} chunks) to ChromaDB: {e}")
+                # Continue with next batch
 
-            # Process files in batches for I/O efficiency
-            total_file_batches = (len(files_to_process) + FILE_BATCH_SIZE - 1) // FILE_BATCH_SIZE
-            
-            for i in range(0, len(files_to_process), FILE_BATCH_SIZE):
-                batch = files_to_process[i:i + FILE_BATCH_SIZE]
-                file_batch_num = i // FILE_BATCH_SIZE + 1
-                
-                if file_batch_num % LOG_BATCH_INTERVAL == 0 or file_batch_num == 1:
-                    logger.info(f"Processing file batch {file_batch_num}/{total_file_batches}")
-                
-                # Process files concurrently
-                tasks = [self._process_file(fp, rp) for fp, rp, _ in batch]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Collect results
-                for j, result in enumerate(results):
-                    file_info = batch[j]  # (filepath, rel_path, mtime)
-                    
-                    if isinstance(result, Exception):
-                        logger.error(f"Failed to process {file_info[1]}: {result}")
-                        continue
-                        
-                    if result:
-                        ids, docs, metas = result
-                        if ids:
-                            pending_ids.extend(ids)
-                            pending_docs.extend(docs)
-                            pending_metas.extend(metas)
-                        
-                        # Track file as pending (even if empty, we want to update cache)
-                        pending_files.append(file_info)
+        # ============================================================
+        # PHASE 5: Update cache for successfully processed files
+        # ============================================================
+        for filepath, rel_path, mtime in successfully_processed_files:
+            self.cache[rel_path] = mtime
+            changes_detected += 1
 
-                # If we have accumulated enough chunks, flush to DB
-                # Using conservative 30K limit to prevent exponential slowdown
-                if len(pending_docs) >= target_batch_size:
-                    await flush_batch()
-
-            # Final flush of any remaining items
-            if pending_files:
-                await flush_batch()
-            
-            # Log final performance summary
-            total_time = time.time() - ingestion_start_time
-            final_rate = total_docs_processed / total_time if total_time > 0 else 0
-            logger.info(
-                f"Ingestion complete: {total_docs_processed} chunks from {len(files_to_process)} files "
-                f"in {total_time:.2f}s ({final_rate:.1f} docs/sec avg)"
-            )
+        # Log final performance summary
+        total_time = time.time() - ingestion_start_time
+        insert_time = time.time() - insert_start_time
+        final_rate = total_upserted / total_time if total_time > 0 else 0
+        
+        logger.info(
+            f"Ingestion complete: {total_upserted} chunks from {len(successfully_processed_files)} files "
+            f"in {total_time:.2f}s (chunking: {chunk_time:.2f}s, upsert: {insert_time:.2f}s) | "
+            f"Rate: {final_rate:.1f} docs/sec avg"
+        )
 
         if changes_detected > 0:
             self._save_cache()
             logger.info(f"Cache saved. {changes_detected} files updated.")
-        else:
-            logger.debug("No changes detected.")
 
-    async def _process_file(self, filepath: str, rel_path: str):
+    async def _generate_chunks_for_file(self, filepath: str, rel_path: str) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
         """
-        Read and chunk a single file. 
-        Returns (ids, documents, metadatas) or None.
+        Read and chunk a single file.
+        Returns (ids, documents, metadatas).
+        Does NOT interact with the database - only generates chunks.
         """
         try:
             # Run file I/O in thread pool to avoid blocking event loop
@@ -269,14 +286,7 @@ class IngestManager:
             with open(filepath, 'r', encoding='utf-8') as f:
                 code = await loop.run_in_executor(None, f.read)
             
-            # Delete old chunks first
-            # Note: This is still synchronous and individual. 
-            # Optimization: Could batch delete, but delete_file_chunks takes one file.
-            # For now, keep it simple.
-            delete_file_chunks(rel_path)
-            
-            # Chunking (CPU bound)
-            # Chunking (CPU bound)
+            # Generate chunks based on file type
             if rel_path.endswith('.py'):
                 # Run CPU-bound chunking in executor
                 chunks = await loop.run_in_executor(None, chunk_python_code, code, rel_path, self.repo_name)
@@ -290,7 +300,7 @@ class IngestManager:
                         source = ''.join(cell.get('source', []))
                         if source.strip():
                             if cell_type == 'code':
-                                cells.append(f"```python\n{source}\n```")
+                                cells.append(f"``````")
                             elif cell_type == 'markdown':
                                 cells.append(source)
                     
@@ -325,6 +335,7 @@ class IngestManager:
                         }
                     }]
             else:
+                # Markdown and other text files
                 chunks = [{
                     "id": f"{rel_path}::text::0",
                     "content": code,
@@ -360,6 +371,7 @@ class IngestManager:
         except Exception as e:
             logger.error(f"Error processing {rel_path}: {e}")
             raise e
+
 
 # Global instance for the default (local) repository
 ingest_manager = IngestManager(repo_path=".", repo_id="default", repo_name="Untango")
