@@ -9,7 +9,7 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
 # Import existing tool implementations
-from .tools.filesystem import read_file, list_files
+from .tools.filesystem import read_file as read_file_impl, list_files as list_files_impl
 from .tools.shell_execution import execute_command as shell_execute, ensure_venv
 from .tools.test_runner import discover_tests as test_discover, run_tests as test_run
 from .tools.git_tools import get_git_status, get_git_diff, get_git_log
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 # Create the MCP server instance
 mcp = FastMCP(
     name="Untango Code Assistant",
-    version="1.0.0",
     json_response=True  # For HTTP transport
 )
 
@@ -71,7 +70,7 @@ def rag_search(query: str) -> str:
 
 
 @mcp.tool()
-def read_file_content(filepath: str, max_lines: int = 500) -> str:
+def read_file(filepath: str, max_lines: int = 500) -> str:
     """
     Read the content of a file from the repository.
     
@@ -85,13 +84,13 @@ def read_file_content(filepath: str, max_lines: int = 500) -> str:
     try:
         base_path = _get_active_repo_path()
         full_path = os.path.join(base_path, filepath)
-        return read_file(full_path, max_lines)
+        return read_file_impl(full_path, max_lines)
     except Exception as e:
         return f"Error reading file: {e}"
 
 
 @mcp.tool()
-def list_directory(directory: str = ".") -> str:
+def list_files(directory: str = ".") -> str:
     """
     List all files and subdirectories in a directory.
     
@@ -104,7 +103,7 @@ def list_directory(directory: str = ".") -> str:
     try:
         base_path = _get_active_repo_path()
         full_path = os.path.join(base_path, directory)
-        return list_files(full_path)
+        return list_files_impl(full_path)
     except Exception as e:
         return f"Error listing files: {e}"
 

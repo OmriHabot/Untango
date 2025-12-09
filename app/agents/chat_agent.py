@@ -287,180 +287,98 @@ def find_function_usages_wrapper(function_name: str) -> str:
         return f"Error finding function usages: {e}"
 
 
-# Map tools to functions
-tools_map = {
-    "rag_search": rag_search,
-    "read_file": read_file_wrapper,
-    "list_files": list_files_wrapper,
-    "get_active_repo_path": get_active_repo_path,
-    # New tools
-    "execute_command": execute_command_wrapper,
-    "discover_tests": discover_tests_wrapper,
-    "run_tests": run_tests_wrapper,
-    "git_status": git_status_wrapper,
-    "git_diff": git_diff_wrapper,
-    "git_log": git_log_wrapper,
-    "run_linter": run_linter_wrapper,
-    "find_function_usages": find_function_usages_wrapper,
-    # get_system_instruction will be added after definition
-}
+# Tools are now provided exclusively by the MCP server
+# See mcp_server.py for available tools:
+# - rag_search, read_file, list_files, execute_command
+# - discover_tests, run_tests, git_status, git_diff, git_log
+# - run_linter, find_function_usages, get_active_repo_path
 
-# Define tool schemas for Vertex AI
-rag_tool = types.Tool(
-    function_declarations=[
-        types.FunctionDeclaration(
-            name="rag_search",
-            description="Search the codebase using RAG. Best for finding code logic, classes, or functions.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "query": types.Schema(type=types.Type.STRING, description="The search query")
-                },
-                required=["query"]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="read_file",
-            description="Read the full content of a file. Use this to examine source code, configs, or any text file.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "filepath": types.Schema(type=types.Type.STRING, description="Relative path to the file from repo root"),
-                    "max_lines": types.Schema(type=types.Type.INTEGER, description="Max lines to read (default 500)")
-                },
-                required=["filepath"]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="list_files",
-            description="List all files and subdirectories in a directory. Use this to explore the repository structure and find files to investigate.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "directory": types.Schema(type=types.Type.STRING, description="Relative path to directory (default: repo root)")
-                },
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="get_system_instruction",
-            description="Get the system instruction used by the agent. Useful for self-reflection or understanding current instructions.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "context_details": types.Schema(type=types.Type.STRING, description="Optional context details to include in the instruction.")
-                },
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="get_active_repo_path",
-            description="Get the absolute path of the currently active repository.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={},
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="get_context_report",
-            description="Get the automated context report (Environment, Repository, Dependencies).",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={},
-                required=[]
-            )
-        ),
-        # New tools
-        types.FunctionDeclaration(
-            name="execute_command",
-            description="Execute a shell command (allowlisted) in the repository's virtual environment. Useful for running scripts, pip commands, or checking environment. Auto-creates venv if missing.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "command": types.Schema(type=types.Type.STRING, description="Command to execute (e.g., 'pip list', 'python script.py', 'pytest')"),
-                    "timeout": types.Schema(type=types.Type.INTEGER, description="Timeout in seconds (default 60)")
-                },
-                required=["command"]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="discover_tests",
-            description="Discover all pytest tests in the repository. Returns list of test files and test functions.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={},
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="run_tests",
-            description="Run pytest tests in the repository. Can run all tests or specific test files/patterns.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "test_path": types.Schema(type=types.Type.STRING, description="Specific test file or pattern (empty = all tests)"),
-                    "verbose": types.Schema(type=types.Type.BOOLEAN, description="Include verbose output (default true)")
-                },
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="git_status",
-            description="Get the git status of the repository. Shows branch, modified files, staged changes, and untracked files.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={},
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="git_diff",
-            description="Get git diff showing changes in the repository or a specific file.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "filepath": types.Schema(type=types.Type.STRING, description="Specific file to diff (empty = all changes)")
-                },
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="git_log",
-            description="Get recent git commit history for the repository or a specific file.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "filepath": types.Schema(type=types.Type.STRING, description="Specific file (empty = entire repo)"),
-                    "max_commits": types.Schema(type=types.Type.INTEGER, description="Maximum commits to return (default 10)")
-                },
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="run_linter",
-            description="Run code linter (auto-detects ruff, flake8, or pylint) on the repository or a specific file.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "filepath": types.Schema(type=types.Type.STRING, description="Specific file to lint (empty = all files)")
-                },
-                required=[]
-            )
-        ),
-        types.FunctionDeclaration(
-            name="find_function_usages",
-            description="Find all places where a function is called in the codebase using AST analysis. Also shows where the function is defined.",
-            parameters=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "function_name": types.Schema(type=types.Type.STRING, description="Name of the function to find usages of")
-                },
-                required=["function_name"]
-            )
-        )
-    ]
-)
+
+
+# Dynamic tool schema loading from MCP server
+# No static tool definitions - tools are fetched from MCP at runtime
+
+async def get_mcp_tools_as_vertex() -> types.Tool:
+    """
+    Fetch available tools from the MCP server and convert them to Vertex AI format.
+    Returns a Tool object with FunctionDeclarations for each MCP tool.
+    """
+    if not MCP_CLIENT_AVAILABLE:
+        logger.warning("MCP client not available, returning empty tool list")
+        return types.Tool(function_declarations=[])
+    
+    try:
+        async with streamablehttp_client(MCP_SERVER_URL) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                
+                # List available tools from MCP server
+                tools_result = await session.list_tools()
+                
+                function_declarations = []
+                for tool in tools_result.tools:
+                    # Convert MCP tool schema to Vertex AI FunctionDeclaration
+                    properties = {}
+                    required = []
+                    
+                    if tool.inputSchema and 'properties' in tool.inputSchema:
+                        for prop_name, prop_schema in tool.inputSchema['properties'].items():
+                            prop_type = prop_schema.get('type', 'string').upper()
+                            # Map JSON schema types to Vertex AI types
+                            type_mapping = {
+                                'STRING': types.Type.STRING,
+                                'INTEGER': types.Type.INTEGER,
+                                'NUMBER': types.Type.NUMBER,
+                                'BOOLEAN': types.Type.BOOLEAN,
+                                'ARRAY': types.Type.ARRAY,
+                                'OBJECT': types.Type.OBJECT,
+                            }
+                            vertex_type = type_mapping.get(prop_type, types.Type.STRING)
+                            
+                            properties[prop_name] = types.Schema(
+                                type=vertex_type,
+                                description=prop_schema.get('description', '')
+                            )
+                        
+                        required = tool.inputSchema.get('required', [])
+                    
+                    func_decl = types.FunctionDeclaration(
+                        name=tool.name,
+                        description=tool.description or f"Tool: {tool.name}",
+                        parameters=types.Schema(
+                            type=types.Type.OBJECT,
+                            properties=properties,
+                            required=required
+                        )
+                    )
+                    function_declarations.append(func_decl)
+                    logger.debug(f"Loaded MCP tool: {tool.name}")
+                
+                logger.info(f"Loaded {len(function_declarations)} tools from MCP server")
+                return types.Tool(function_declarations=function_declarations)
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch MCP tools: {e}")
+        return types.Tool(function_declarations=[])
+
+# Cache for MCP tools to avoid fetching on every request
+_cached_mcp_tools: types.Tool = None
+_mcp_tools_cache_time: float = 0
+MCP_TOOLS_CACHE_TTL = 60  # Cache tools for 60 seconds
+
+async def get_cached_mcp_tools() -> types.Tool:
+    """Get MCP tools with caching."""
+    global _cached_mcp_tools, _mcp_tools_cache_time
+    import time
+    
+    now = time.time()
+    if _cached_mcp_tools is None or (now - _mcp_tools_cache_time) > MCP_TOOLS_CACHE_TTL:
+        _cached_mcp_tools = await get_mcp_tools_as_vertex()
+        _mcp_tools_cache_time = now
+    
+    return _cached_mcp_tools
+
+
 
 from ..context_manager import context_manager
 from datetime import datetime
@@ -676,13 +594,11 @@ def get_context_report_wrapper() -> str:
     report = context_manager.get_context_report()
     return report.to_string() if report else "Context not initialized."
 
-# Add to tools map
-tools_map["get_system_instruction"] = get_system_instruction_wrapper
-tools_map["get_context_report"] = get_context_report_wrapper
+
 
 
 # MCP URL for local server
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp")
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8001/mcp")
 
 
 async def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -716,6 +632,10 @@ async def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
                 return "Tool executed successfully (no output)"
                 
     except Exception as e:
+        # Check for ExceptionGroup (Python 3.11+) or similar wrappers
+        if hasattr(e, 'exceptions'):
+            for sub_exc in e.exceptions:
+                logger.error(f"MCP sub-exception: {sub_exc}")
         logger.error(f"MCP tool execution failed: {e}")
         raise
 
@@ -748,9 +668,12 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         context_str = context_report.to_string() if context_report else "Context not initialized yet."
         repo_name = context_report.repo_map.repo_name if context_report else "Unknown Repo"
 
+        # Fetch tools dynamically from MCP server
+        mcp_tools = await get_cached_mcp_tools()
+        
         # Configuration
         config = types.GenerateContentConfig(
-            tools=[rag_tool],
+            tools=[mcp_tools],
             temperature=0.0, # Low temp for tool use
             system_instruction=get_system_instruction(context_str, repo_name)
         )
@@ -837,24 +760,15 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
                 # Convert args to dict
                 args_dict = {k: v for k, v in fn_args.items()}
                 
-                # Try MCP first, fallback to tools_map
+                # Execute tool via MCP (no legacy fallback)
                 try:
                     if MCP_CLIENT_AVAILABLE:
                         result = await execute_mcp_tool(fn_name, args_dict)
-                    elif fn_name in tools_map:
-                        result = tools_map[fn_name](**args_dict)
                     else:
-                        result = f"Error: Unknown tool {fn_name}"
+                        result = f"Error: MCP client not available, cannot execute tool {fn_name}"
                 except Exception as e:
-                    logger.error(f"Tool execution failed: {e}")
-                    # Fallback to local tools_map
-                    if fn_name in tools_map:
-                        try:
-                            result = tools_map[fn_name](**args_dict)
-                        except Exception as e2:
-                            result = f"Error executing {fn_name}: {e2}"
-                    else:
-                        result = f"Error executing {fn_name}: {e}"
+                    logger.error(f"MCP tool execution failed for {fn_name}: {e}")
+                    result = f"Error executing {fn_name}: {e}"
                 
                 tool_outputs.append(
                     types.Part.from_function_response(
@@ -945,8 +859,11 @@ async def chat_with_agent_stream(request: ChatRequest):
         context_str = context_report.to_string() if context_report else "Context not initialized yet."
         repo_name = context_report.repo_map.repo_name if context_report else "Unknown Repo"
 
+        # Fetch tools dynamically from MCP server
+        mcp_tools = await get_cached_mcp_tools()
+        
         config = types.GenerateContentConfig(
-            tools=[rag_tool],
+            tools=[mcp_tools],
             temperature=0.0,
             system_instruction=get_system_instruction(context_str, repo_name)
         )
@@ -1020,23 +937,16 @@ async def chat_with_agent_stream(request: ChatRequest):
                     
                     logger.info(f"Agent calling tool: {fn_name} with args: {fn_args}")
                     
-                    if fn_name in tools_map:
-                        try:
-                            args_dict = {k: v for k, v in fn_args.items()}
-                            
-                            # Try MCP first, fallback to tools_map
-                            try:
-                                if MCP_CLIENT_AVAILABLE:
-                                    result = await execute_mcp_tool(fn_name, args_dict)
-                                else:
-                                    result = tools_map[fn_name](**args_dict)
-                            except Exception as mcp_err:
-                                logger.warning(f"MCP call failed, using fallback: {mcp_err}")
-                                result = tools_map[fn_name](**args_dict)
-                        except Exception as e:
-                            result = f"Error executing {fn_name}: {e}"
-                    else:
-                        result = f"Error: Unknown tool {fn_name}"
+                    # Execute tool via MCP (no legacy fallback)
+                    args_dict = {k: v for k, v in fn_args.items()}
+                    try:
+                        if MCP_CLIENT_AVAILABLE:
+                            result = await execute_mcp_tool(fn_name, args_dict)
+                        else:
+                            result = f"Error: MCP client not available, cannot execute tool {fn_name}"
+                    except Exception as e:
+                        logger.error(f"MCP tool execution failed for {fn_name}: {e}")
+                        result = f"Error executing {fn_name}: {e}"
                     
                     # Notify frontend of result
                     yield json.dumps({
