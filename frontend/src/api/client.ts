@@ -125,5 +125,33 @@ export const api = {
 
   isLocalBackend: () => {
     return API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
+  },
+
+  // Local directory upload via File System Access API
+  uploadLocalDirectory: async (bundle: Blob, repoName: string, sourcePath: string) => {
+    const formData = new FormData();
+    formData.append('bundle', bundle, 'repo.zip');
+    formData.append('repo_name', repoName);
+    formData.append('source_path', sourcePath);
+    formData.append('venv_python', '');
+
+    const response = await client.post<IngestResponse>('/api/ingest-local-upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  },
+
+  // Sync changed files for watch mode
+  syncRepository: async (bundle: Blob, repoId: string) => {
+    const formData = new FormData();
+    formData.append('bundle', bundle, 'changes.zip');
+    formData.append('repo_id', repoId);
+
+    const response = await client.post<{ status: string; synced_files: number }>(
+      '/api/sync-repository', 
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+    return response.data;
   }
 };

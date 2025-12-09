@@ -379,13 +379,31 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
 
             # Check for function calls
             function_calls = []
-            for part in candidate.content.parts:
-                if part.function_call:
-                    function_calls.append(part.function_call)
+            if candidate.content and candidate.content.parts:
+                for part in candidate.content.parts:
+                    if part.function_call:
+                        function_calls.append(part.function_call)
             
             if not function_calls:
-                # No function calls, this is the final answer
-                final_response_text = candidate.content.parts[0].text
+                # No function calls, check if we have a final answer
+                if candidate.content and candidate.content.parts and candidate.content.parts[0].text:
+                    final_response_text = candidate.content.parts[0].text
+                    break
+                
+                # Handle empty response after tool call - prompt the model to continue
+                if current_turn > 0 and not final_response_text:
+                    logger.warning("Empty response after tool call on turn %d, prompting model to continue", current_turn)
+                    contents.append(types.Content(
+                        role="user", 
+                        parts=[types.Part(text="Based on the tool results above, please provide your answer.")]
+                    ))
+                    response = await client.aio.models.generate_content(
+                        model=request.model,
+                        contents=contents,
+                        config=config
+                    )
+                    current_turn += 1
+                    continue
                 break
             
             # Execute tools
@@ -536,6 +554,9 @@ async def chat_with_agent_stream(request: ChatRequest):
                 
                 candidate = chunk.candidates[0]
                 
+                if not candidate.content or not candidate.content.parts:
+                    continue
+                
                 for part in candidate.content.parts:
                     if part.text:
                         full_text += part.text
@@ -600,9 +621,20 @@ async def chat_with_agent_stream(request: ChatRequest):
                 continue
             
             else:
-                # No function calls, we are done
+                # No function calls, check if we have a response
                 if full_text:
                     contents.append(types.Content(role="model", parts=[types.Part(text=full_text)]))
+                    break
+                
+                # Handle empty response after tool call - prompt the model to continue
+                if current_turn > 0:
+                    logger.warning("Stream: Empty response after tool call on turn %d, prompting model to continue", current_turn)
+                    contents.append(types.Content(
+                        role="user", 
+                        parts=[types.Part(text="Based on the tool results above, please provide your answer.")]
+                    ))
+                    current_turn += 1
+                    continue
                 break
 
     except Exception as e:

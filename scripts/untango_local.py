@@ -32,7 +32,8 @@ except ImportError:
 INCLUDE_EXTENSIONS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.md', '.txt', '.json', '.yaml', '.yml', '.html', '.css', '.ipynb'}
 
 # Directories to skip
-SKIP_DIRS = {'.git', '__pycache__', '.venv', 'venv', 'node_modules', '.repos', 'dist', 'build', '.next'}
+# Note: .venv and venv are NOT skipped - we want to include virtual environments
+SKIP_DIRS = {'.git', '__pycache__', 'node_modules', '.repos', 'dist', 'build', '.next'}
 
 
 def find_venv_python(repo_path: str) -> Optional[str]:
