@@ -30,8 +30,8 @@ services:
       - CHROMA_PORT=8000
       - CHROMA_COLLECTION_NAME=python_code_chunks
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
-      - GOOGLE_CLOUD_PROJECT=noble-nation-424408-g0
-      - GOOGLE_CLOUD_LOCATION=us-central1
+      - GOOGLE_CLOUD_PROJECT=coms-6998-478617
+      - GOOGLE_CLOUD_LOCATION=global
     restart: unless-stopped
     command: >
       sh -c "sleep 10 && uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload --reload-dir /app/app --reload-exclude '*/repos/*' --timeout-keep-alive 75 --timeout-graceful-shutdown 10"

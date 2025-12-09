@@ -52,6 +52,15 @@ from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
 from .chat_history import chat_history_manager
 from .context_manager import context_manager
 
+# Import MCP server
+try:
+    from .mcp_server import mcp as mcp_server
+    MCP_AVAILABLE = True
+except ImportError as e:
+    MCP_AVAILABLE = False
+    import warnings
+    warnings.warn(f"MCP server not available: {e}")
+
 
 LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
 JSON_LOGS = os.getenv("APP_LOG_JSON", "false").lower() in {"1", "true", "yes"}
@@ -60,11 +69,38 @@ setup_logging(log_level=LOG_LEVEL, json_logs=JSON_LOGS)
 logger = get_logger(__name__)
 
 
+# Lifespan context manager for startup/shutdown
+import contextlib
+
+@contextlib.asynccontextmanager
+async def lifespan(app):
+    """Manage application lifecycle including MCP session manager."""
+    logger.info("Starting application...")
+    
+    if MCP_AVAILABLE:
+        logger.info("Starting MCP server session manager...")
+        async with mcp_server.session_manager.run():
+            logger.info("MCP server ready")
+            yield
+    else:
+        logger.warning("MCP server not available, running without MCP")
+        yield
+    
+    logger.info("Application shutdown complete")
+
+
 app = FastAPI(
     title="RAG Backend",
-    description="Intelligent code chunking and retrieval with hybrid search",
-    version="1.0.0"
+    description="Intelligent code chunking and retrieval with hybrid search. MCP endpoint available at /mcp.",
+    version="1.0.0",
+    lifespan=lifespan
 )
+
+# Mount MCP server if available
+if MCP_AVAILABLE:
+    # Configure MCP to mount at root of the /mcp path
+    mcp_server.settings.streamable_http_path = "/"
+    app.mount("/mcp", mcp_server.streamable_http_app())
 
 # Configure CORS
 app.add_middleware(

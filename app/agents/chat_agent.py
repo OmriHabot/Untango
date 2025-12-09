@@ -17,8 +17,21 @@ from google.genai import types
 
 from ..models import ChatRequest, ChatResponse, TokenUsage, ToolCall
 from ..tools.filesystem import read_file, list_files
+from ..tools.shell_execution import execute_command as shell_execute, ensure_venv
+from ..tools.test_runner import discover_tests as test_discover, run_tests as test_run
+from ..tools.git_tools import get_git_status, get_git_diff, get_git_log
+from ..tools.code_quality import run_linter as quality_lint
+from ..tools.ast_tools import find_function_usages as ast_find_usages
 from ..search import perform_hybrid_search
 from ..active_repo_state import active_repo_state
+
+# MCP Client imports
+try:
+    from mcp import ClientSession, types as mcp_types
+    from mcp.client.streamable_http import streamablehttp_client
+    MCP_CLIENT_AVAILABLE = True
+except ImportError:
+    MCP_CLIENT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +109,199 @@ def list_files_wrapper(directory: str = ".") -> str:
     except Exception as e:
         return f"Error listing files: {e}"
 
-# Map tools to functions
+
+# --- New Tool Wrappers ---
+
+def execute_command_wrapper(command: str, timeout: int = 60) -> str:
+    """Execute a shell command in the repository's virtual environment."""
+    try:
+        repo_path = get_active_repo_path()
+        result = shell_execute(command, repo_path=repo_path, timeout=timeout, use_venv=True)
+        
+        output = f"Command: {result.get('command_executed', command)}\n"
+        output += f"Exit Code: {result.get('exit_code', -1)}\n"
+        if result.get('venv_used'):
+            output += "(Executed in virtual environment)\n"
+        output += "\n--- STDOUT ---\n" + result.get('stdout', '')
+        if result.get('stderr'):
+            output += "\n--- STDERR ---\n" + result.get('stderr', '')
+        if result.get('timed_out'):
+            output += f"\n[TIMED OUT after {timeout}s]"
+        return output
+    except Exception as e:
+        return f"Error executing command: {e}"
+
+
+def discover_tests_wrapper() -> str:
+    """Discover all pytest tests in the repository."""
+    try:
+        repo_path = get_active_repo_path()
+        result = test_discover(repo_path)
+        
+        output = f"Test Discovery Results:\n"
+        output += f"- Test files: {len(result.get('test_files', []))}\n"
+        output += f"- Test functions: {result.get('test_count', 0)}\n\n"
+        
+        if result.get('test_files'):
+            output += "Test Files:\n"
+            for f in result['test_files'][:20]:  # Limit to 20
+                output += f"  - {f}\n"
+            if len(result['test_files']) > 20:
+                output += f"  ... and {len(result['test_files']) - 20} more\n"
+        
+        return output
+    except Exception as e:
+        return f"Error discovering tests: {e}"
+
+
+def run_tests_wrapper(test_path: str = "", verbose: bool = True) -> str:
+    """Run pytest tests in the repository."""
+    try:
+        repo_path = get_active_repo_path()
+        result = test_run(repo_path, test_path=test_path, verbose=verbose)
+        
+        output = f"Test Results:\n"
+        output += f"- Passed: {result.get('passed', 0)}\n"
+        output += f"- Failed: {result.get('failed', 0)}\n"
+        output += f"- Errors: {result.get('errors', 0)}\n"
+        output += f"- Skipped: {result.get('skipped', 0)}\n"
+        output += f"- Duration: {result.get('duration_seconds', 0):.2f}s\n\n"
+        output += "--- Output ---\n" + result.get('output', '')
+        return output
+    except Exception as e:
+        return f"Error running tests: {e}"
+
+
+def git_status_wrapper() -> str:
+    """Get the git status of the repository."""
+    try:
+        repo_path = get_active_repo_path()
+        result = get_git_status(repo_path)
+        
+        if not result.get('success'):
+            return f"Git status failed: {result.get('output', 'Unknown error')}"
+        
+        output = f"Branch: {result.get('branch', 'unknown')}\n"
+        output += f"Status: {'Clean' if result.get('clean') else 'Modified'}\n"
+        
+        if result.get('modified'):
+            output += f"\nModified files ({len(result['modified'])}):\n"
+            for f in result['modified'][:10]:
+                output += f"  M {f}\n"
+        
+        if result.get('staged'):
+            output += f"\nStaged files ({len(result['staged'])}):\n"
+            for f in result['staged'][:10]:
+                output += f"  + {f}\n"
+        
+        if result.get('untracked'):
+            output += f"\nUntracked files ({len(result['untracked'])}):\n"
+            for f in result['untracked'][:10]:
+                output += f"  ? {f}\n"
+        
+        return output
+    except Exception as e:
+        return f"Error getting git status: {e}"
+
+
+def git_diff_wrapper(filepath: str = "") -> str:
+    """Get git diff for the repository or a specific file."""
+    try:
+        repo_path = get_active_repo_path()
+        result = get_git_diff(repo_path, filepath=filepath)
+        
+        if not result.get('success') and not result.get('diff'):
+            return "No changes to show."
+        
+        output = f"Files changed: {result.get('files_changed', 0)}\n"
+        output += f"Insertions: +{result.get('insertions', 0)}\n"
+        output += f"Deletions: -{result.get('deletions', 0)}\n\n"
+        output += result.get('diff', '')
+        return output
+    except Exception as e:
+        return f"Error getting git diff: {e}"
+
+
+def git_log_wrapper(filepath: str = "", max_commits: int = 10) -> str:
+    """Get git log for the repository or a specific file."""
+    try:
+        repo_path = get_active_repo_path()
+        result = get_git_log(repo_path, filepath=filepath, max_commits=max_commits)
+        
+        if not result.get('success'):
+            return f"Git log failed: {result.get('output', 'Unknown error')}"
+        
+        output = f"Recent commits ({len(result.get('commits', []))}):\n\n"
+        for commit in result.get('commits', []):
+            output += f"{commit.get('short_hash', '')} - {commit.get('message', '')}\n"
+            output += f"  Author: {commit.get('author', '')} | {commit.get('date', '')}\n\n"
+        
+        return output
+    except Exception as e:
+        return f"Error getting git log: {e}"
+
+
+def run_linter_wrapper(filepath: str = "") -> str:
+    """Run linter on the repository or a specific file."""
+    try:
+        repo_path = get_active_repo_path()
+        result = quality_lint(repo_path, filepath=filepath)
+        
+        output = f"Linter: {result.get('linter_used', 'unknown')}\n"
+        output += f"Issues found: {result.get('issue_count', 0)}\n\n"
+        
+        if result.get('issues'):
+            for issue in result['issues'][:20]:  # Limit to 20
+                output += f"{issue.get('file')}:{issue.get('line')}: {issue.get('message')}\n"
+            if len(result['issues']) > 20:
+                output += f"\n... and {len(result['issues']) - 20} more issues\n"
+        
+        return output
+    except Exception as e:
+        return f"Error running linter: {e}"
+
+
+def find_function_usages_wrapper(function_name: str) -> str:
+    """Find all usages of a function in the codebase."""
+    try:
+        repo_path = get_active_repo_path()
+        result = ast_find_usages(repo_path, function_name, include_definitions=True)
+        
+        output = f"Searching for usages of '{function_name}':\n\n"
+        
+        if result.get('definitions'):
+            output += f"Definitions ({len(result['definitions'])}):\n"
+            for defn in result['definitions']:
+                output += f"  {defn.get('file')}:{defn.get('line')}\n"
+            output += "\n"
+        
+        output += f"Usages ({result.get('usage_count', 0)}):\n"
+        for usage in result.get('usages', [])[:30]:  # Limit to 30
+            output += f"  {usage.get('file')}:{usage.get('line')} ({usage.get('type')})\n"
+        
+        if result.get('usage_count', 0) > 30:
+            output += f"\n... and {result['usage_count'] - 30} more usages\n"
+        
+        return output
+    except Exception as e:
+        return f"Error finding function usages: {e}"
+
+
 # Map tools to functions
 tools_map = {
     "rag_search": rag_search,
     "read_file": read_file_wrapper,
     "list_files": list_files_wrapper,
     "get_active_repo_path": get_active_repo_path,
+    # New tools
+    "execute_command": execute_command_wrapper,
+    "discover_tests": discover_tests_wrapper,
+    "run_tests": run_tests_wrapper,
+    "git_status": git_status_wrapper,
+    "git_diff": git_diff_wrapper,
+    "git_log": git_log_wrapper,
+    "run_linter": run_linter_wrapper,
+    "find_function_usages": find_function_usages_wrapper,
     # get_system_instruction will be added after definition
 }
 
@@ -171,121 +370,301 @@ rag_tool = types.Tool(
                 properties={},
                 required=[]
             )
+        ),
+        # New tools
+        types.FunctionDeclaration(
+            name="execute_command",
+            description="Execute a shell command (allowlisted) in the repository's virtual environment. Useful for running scripts, pip commands, or checking environment. Auto-creates venv if missing.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "command": types.Schema(type=types.Type.STRING, description="Command to execute (e.g., 'pip list', 'python script.py', 'pytest')"),
+                    "timeout": types.Schema(type=types.Type.INTEGER, description="Timeout in seconds (default 60)")
+                },
+                required=["command"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="discover_tests",
+            description="Discover all pytest tests in the repository. Returns list of test files and test functions.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={},
+                required=[]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="run_tests",
+            description="Run pytest tests in the repository. Can run all tests or specific test files/patterns.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "test_path": types.Schema(type=types.Type.STRING, description="Specific test file or pattern (empty = all tests)"),
+                    "verbose": types.Schema(type=types.Type.BOOLEAN, description="Include verbose output (default true)")
+                },
+                required=[]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="git_status",
+            description="Get the git status of the repository. Shows branch, modified files, staged changes, and untracked files.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={},
+                required=[]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="git_diff",
+            description="Get git diff showing changes in the repository or a specific file.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "filepath": types.Schema(type=types.Type.STRING, description="Specific file to diff (empty = all changes)")
+                },
+                required=[]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="git_log",
+            description="Get recent git commit history for the repository or a specific file.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "filepath": types.Schema(type=types.Type.STRING, description="Specific file (empty = entire repo)"),
+                    "max_commits": types.Schema(type=types.Type.INTEGER, description="Maximum commits to return (default 10)")
+                },
+                required=[]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="run_linter",
+            description="Run code linter (auto-detects ruff, flake8, or pylint) on the repository or a specific file.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "filepath": types.Schema(type=types.Type.STRING, description="Specific file to lint (empty = all files)")
+                },
+                required=[]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="find_function_usages",
+            description="Find all places where a function is called in the codebase using AST analysis. Also shows where the function is defined.",
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "function_name": types.Schema(type=types.Type.STRING, description="Name of the function to find usages of")
+                },
+                required=["function_name"]
+            )
         )
     ]
 )
 
 from ..context_manager import context_manager
+from datetime import datetime
 
 def get_system_instruction(context_str: str, repo_name: str) -> str:
     """Generate the system instruction with context and CoT protocol."""
+    current_date = datetime.now().strftime("%A, %B %d, %Y")
+    
     return f"""You are an expert software developer and coding assistant for the '{repo_name}' repository.
 You have full access to the source code of '{repo_name}' and are answering questions specifically about it.
+
+**Current Date:** {current_date}
 
 === AUTOMATED CONTEXT ===
 {context_str}
 =========================
 
-=== MANDATORY FIRST STEP ===
+=== YOUR TOOLS (USE THEM LIBERALLY) ===
 
-**ALWAYS call `list_files()` FIRST before doing anything else!**
-This gives you a complete view of all files in the repository.
-Then drill into subdirectories with `list_files("subdir")` as needed.
-
-=== YOUR TOOLS (USE THEM!) ===
-
-You have access to these tools to explore and understand the codebase. Use them liberally!
+You have access to these tools to explore and understand the codebase. Use them extensively!
 
 **1. list_files(directory=".")**
    - Lists all files and subdirectories in a directory
    - ALWAYS call this first to see the full repo structure
    - Then drill into subdirectories: `list_files("src")`, `list_files("tests")`, etc.
+   - Use this whenever you encounter an unfamiliar directory
 
-**2. read_file(filepath, max_lines=500)**  
+
+**2. read_file(filepath, max_lines=500)**
    - Reads the full content of any file
-   - Use this to examine source code, configs, README, etc.
+   - Use this to examine source code, configs, README, requirements, etc.
    - Path is relative to repo root (e.g., "src/main.py")
    - USE THIS LIBERALLY - read every file you're curious about
+   - If a file is truncated at 500 lines, read it in chunks or call again with a different range
+
 
 **3. rag_search(query)**
    - Semantic search across the entire codebase
-   - Best for finding: function implementations, class definitions, usage patterns
-   - Example queries: "how is authentication handled", "database connection", "error handling"
+   - Best for finding: function implementations, class definitions, usage patterns, error handling
+   - Example queries: "how is authentication handled", "database connection", "error handling", "API endpoints"
+   - Great for discovering patterns without reading every file
+
 
 **4. get_context_report()**
    - Returns environment info (OS, Python version), repo structure, and dependencies
-   - Already provided above, but call this if you need a refresh
+   - Already provided above, but call this if you need a refresh or updated information
+
 
 **5. get_active_repo_path()**
    - Returns the absolute filesystem path to the repository
-   - Useful if you need to understand file paths
+   - Useful if you need to understand full file system paths
 
-=== EXPLORATION WORKFLOW ===
 
-When answering any question, follow this EXACT workflow:
+**6. execute_command(command, timeout=60)**
+   - Execute shell commands in the repo's virtual environment (auto-creates .venv if missing)
+   - Allowlisted commands only: pytest, pip list/install, git status/diff/log, ruff/flake8/mypy
+   - Example: `execute_command("pip list")`, `execute_command("pytest tests/")`
 
-1. **FIRST: Call `list_files()`** (MANDATORY!)
-   - This shows you ALL files in the repository root
-   - Then call `list_files("subdir")` for any interesting subdirectories
 
-2. **Read entry points**:
+**7. discover_tests()**
+   - Find all pytest test files and functions in the repository
+   - Use this before running tests to understand what's available
+
+
+**8. run_tests(test_path="", verbose=True)**
+   - Run pytest tests in the repository
+   - Can run all tests or specific file: `run_tests("tests/test_api.py")`
+
+
+**9. git_status()**
+   - Get current branch, modified/staged/untracked files
+   - Use this to understand the current state of changes
+
+
+**10. git_diff(filepath="")**
+   - View code changes (working directory vs HEAD)
+   - Can view all changes or specific file
+
+
+**11. git_log(filepath="", max_commits=10)**
+   - View recent commit history
+   - Useful for understanding when/why code changed
+
+
+**12. run_linter(filepath="")**
+   - Run code linter (auto-detects ruff/flake8/pylint)
+   - Reports style issues and potential bugs
+
+
+**13. find_function_usages(function_name)**
+   - Find all places a function is defined and called
+   - Uses AST analysis for accurate results
+
+
+=== EXPLORATION WORKFLOW (CRITICAL) ===
+
+Follow this EXACT workflow when answering any question:
+
+**Step 1: FIRST CALL - Directory Structure**
+   - Call `list_files()` to see all files in repository root
+   - This is MANDATORY - do not skip
+   - Then call `list_files("subdir")` for subdirectories you're interested in
+
+
+**Step 2: Identify Entry Points & Key Files**
    - main.py, app.py, index.js, __init__.py
-   - README.md for project overview
-   - config.py, settings.py for configuration
+   - README.md for project overview and setup instructions
+   - config.py, settings.py, .env.example for configuration
+   - requirements.txt, pyproject.toml, package.json for dependencies
 
-3. **Follow the trail**:
-   - When you see imports, read those files too
+
+**Step 3: Systematic Exploration**
+   - When you see imports, read those files to understand dependencies
    - When you find a function call, search for its definition
    - When you see a class, read its full implementation
+   - Follow the import chain completely - don't assume based on naming
 
-4. **Search for patterns**:
-   - Use `rag_search` to find all usages of a function/class
-   - Search for error messages, config keys, API endpoints
 
-5. **Read related files**:
-   - Tests often reveal expected behavior
-   - Documentation files explain intent
-   - Config files reveal available options
+**Step 4: Pattern Discovery**
+   - Use `rag_search` to find all usages of specific functions/classes
+   - Search for error messages and exception handling
+   - Look for configuration keys and API endpoints
+   - Search for decorators and special patterns
 
-=== KEEP EXPLORING UNTIL SATISFIED ===
 
-If you check a directory or file and don't find what you need:
-- **Try another directory** - keep calling `list_files()` on different folders
-- **Try a different search query** - rephrase and use `rag_search` again
-- **Read more files** - the answer might be in a related file you haven't checked
-- **Don't give up early** - explore until you have enough information
+**Step 5: Comprehensive Context Building**
+   - Read tests to understand expected behavior (often more reliable than comments)
+   - Read documentation and docstrings for intent and usage
+   - Read config files to understand available options
+   - Cross-reference related files
 
-You have unlimited tool calls. Use them! Keep exploring until you're confident in your answer.
+
+**Step 6: Verify Understanding**
+   - Once you have information, search for edge cases or alternative implementations
+   - Look for comments explaining non-obvious logic
+   - Check for error handling and validation
+
+
+=== AGGRESSIVE EXPLORATION PRINCIPLE ===
+
+**DO NOT GIVE UP EARLY.** If you don't find what you need:
+
+- **Try different search terms** - Rephrase and use `rag_search` with different keywords
+- **Explore adjacent directories** - Keep calling `list_files()` on different folders
+- **Read more files** - The answer might be in a related file you haven't checked yet
+- **Follow import chains** - Read every imported module
+- **Check test files** - Tests often reveal implementation details better than source code
+- **Look for patterns** - Search for similar patterns using RAG
+
+You have unlimited tool calls. Exploration is free. Keep going until you're confident.
+
 
 === CRITICAL RULES ===
 
 **DO:**
-- Use `read_file` on EVERY file you're curious about
+- Call `read_file` on EVERY file you're curious about - it's free
 - Use `list_files` to explore unfamiliar directories
-- Use `rag_search` to find function/class usages
-- Read MORE files rather than fewer
-- Follow import chains completely
+- Use `rag_search` to find function/class usages and patterns
+- Read MORE files rather than fewer - each file may contain crucial context
+- Follow import chains all the way through
+- Check multiple related files to build complete understanding
+- Search with different query variations for comprehensive coverage
+
 
 **DON'T:**
-- NEVER answer "I don't have access to..." - you DO have access, use the tools!
-- NEVER say "I would need to see..." - just go read it!
-- NEVER guess what a file contains - read it!
-- NEVER assume based on filename alone - read it!
-- NEVER give incomplete answers when you could read one more file
+- NEVER respond with "I don't have access to..." - You DO have access, use your tools!
+- NEVER say "I would need to see..." - Just read the file with your tools!
+- NEVER guess what a file contains - Always read it first
+- NEVER assume anything based on filename alone - Verify by reading
+- NEVER give incomplete answers when exploring would only take one more tool call
+- NEVER skip the initial `list_files()` step
 
-=== SELF-CHECK BEFORE ANSWERING ===
+
+=== SELF-VERIFICATION CHECKLIST ===
 
 Before writing your final answer, ask yourself:
-1. "Have I seen the actual code, or am I guessing?"
-2. "Is there another file I should check?"
-3. "Did I follow all the imports?"
-4. "Would reading one more file improve my answer?"
 
-If YES to any of these → investigate more first!
+1. "Have I actually seen the relevant code, or am I making assumptions?"
+2. "Are there other files in the codebase I should check?"
+3. "Did I follow all import chains to their source?"
+4. "Could reading one more file significantly improve my answer?"
+5. "Have I searched for related patterns using RAG?"
+6. "Are there edge cases I should look for?"
 
-=== VERSION INFERENCE ===
-If dependencies lack versions, check the "Last Updated" date and infer versions accordingly.
-WARN the user if there's a significant time gap between repo age and their current packages.
+
+If you answer YES to any of these → investigate further first!
+
+
+=== VERSION & DEPENDENCY INFERENCE ===
+
+- If dependencies lack explicit versions, check the "Last Updated" date and infer versions accordingly
+- Cross-reference with LTS versions and stability guidelines
+- WARN the user if there's a significant time gap between repo age and their current environment packages
+- Use `get_context_report()` to understand the environment and identify version conflicts
+
+
+=== RESPONSE QUALITY STANDARDS ===
+
+- Provide complete, accurate answers backed by the actual code you've read
+- Reference specific files and line numbers when helpful
+- Explain the "why" behind implementations, not just the "what"
+- Identify potential issues or improvements you notice
+- Suggest follow-up questions if the user's intent is unclear
+- Be specific and concrete - avoid vague generalizations
 """
 
 def get_system_instruction_wrapper(context_details: str = "") -> str:
@@ -300,6 +679,45 @@ def get_context_report_wrapper() -> str:
 # Add to tools map
 tools_map["get_system_instruction"] = get_system_instruction_wrapper
 tools_map["get_context_report"] = get_context_report_wrapper
+
+
+# MCP URL for local server
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp")
+
+
+async def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
+    """
+    Execute a tool via MCP client.
+    Connects to the MCP server and calls the specified tool.
+    """
+    if not MCP_CLIENT_AVAILABLE:
+        raise RuntimeError("MCP client not available")
+    
+    try:
+        async with streamablehttp_client(MCP_SERVER_URL) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                
+                # Call the tool
+                result = await session.call_tool(tool_name, arguments=arguments)
+                
+                # Extract text content from result
+                if result.content:
+                    for content_block in result.content:
+                        if hasattr(content_block, 'text'):
+                            return content_block.text
+                        elif hasattr(content_block, 'data'):
+                            return str(content_block.data)
+                
+                # Check structured content
+                if result.structuredContent:
+                    return json.dumps(result.structuredContent)
+                
+                return "Tool executed successfully (no output)"
+                
+    except Exception as e:
+        logger.error(f"MCP tool execution failed: {e}")
+        raise
 
 
 async def chat_with_agent(request: ChatRequest) -> ChatResponse:
@@ -416,16 +834,27 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
                 
                 logger.info(f"Agent calling tool: {fn_name} with args: {fn_args}")
                 
-                if fn_name in tools_map:
-                    try:
-                        # Convert args to dict
-                        args_dict = {k: v for k, v in fn_args.items()}
-                        # Check if tool is async (not currently, but good practice)
+                # Convert args to dict
+                args_dict = {k: v for k, v in fn_args.items()}
+                
+                # Try MCP first, fallback to tools_map
+                try:
+                    if MCP_CLIENT_AVAILABLE:
+                        result = await execute_mcp_tool(fn_name, args_dict)
+                    elif fn_name in tools_map:
                         result = tools_map[fn_name](**args_dict)
-                    except Exception as e:
+                    else:
+                        result = f"Error: Unknown tool {fn_name}"
+                except Exception as e:
+                    logger.error(f"Tool execution failed: {e}")
+                    # Fallback to local tools_map
+                    if fn_name in tools_map:
+                        try:
+                            result = tools_map[fn_name](**args_dict)
+                        except Exception as e2:
+                            result = f"Error executing {fn_name}: {e2}"
+                    else:
                         result = f"Error executing {fn_name}: {e}"
-                else:
-                    result = f"Error: Unknown tool {fn_name}"
                 
                 tool_outputs.append(
                     types.Part.from_function_response(
@@ -594,7 +1023,16 @@ async def chat_with_agent_stream(request: ChatRequest):
                     if fn_name in tools_map:
                         try:
                             args_dict = {k: v for k, v in fn_args.items()}
-                            result = tools_map[fn_name](**args_dict)
+                            
+                            # Try MCP first, fallback to tools_map
+                            try:
+                                if MCP_CLIENT_AVAILABLE:
+                                    result = await execute_mcp_tool(fn_name, args_dict)
+                                else:
+                                    result = tools_map[fn_name](**args_dict)
+                            except Exception as mcp_err:
+                                logger.warning(f"MCP call failed, using fallback: {mcp_err}")
+                                result = tools_map[fn_name](**args_dict)
                         except Exception as e:
                             result = f"Error executing {fn_name}: {e}"
                     else:
