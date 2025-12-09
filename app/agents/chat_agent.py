@@ -383,15 +383,41 @@ async def get_cached_mcp_tools() -> types.Tool:
 from ..context_manager import context_manager
 from datetime import datetime
 
+def get_readme_content() -> str:
+    """Read README.md from the active repository root if it exists."""
+    try:
+        repo_path = get_active_repo_path()
+        readme_path = os.path.join(repo_path, "README.md")
+        if os.path.exists(readme_path):
+            with open(readme_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # Limit to first 3000 chars to avoid context overflow
+                if len(content) > 3000:
+                    content = content[:3000] + "\n\n... (README truncated)"
+                return content
+    except Exception as e:
+        logger.warning(f"Failed to read README.md: {e}")
+    return ""
+
 def get_system_instruction(context_str: str, repo_name: str) -> str:
     """Generate the system instruction with context and CoT protocol."""
     current_date = datetime.now().strftime("%A, %B %d, %Y")
+    
+    # Read README.md if available
+    readme_content = get_readme_content()
+    readme_section = ""
+    if readme_content:
+        readme_section = f"""
+=== PROJECT README ===
+{readme_content}
+======================
+"""
     
     return f"""You are an expert software developer and coding assistant for the '{repo_name}' repository.
 You have full access to the source code of '{repo_name}' and are answering questions specifically about it.
 
 **Current Date:** {current_date}
-
+{readme_section}
 === AUTOMATED CONTEXT ===
 {context_str}
 =========================
@@ -583,6 +609,40 @@ If you answer YES to any of these → investigate further first!
 - Identify potential issues or improvements you notice
 - Suggest follow-up questions if the user's intent is unclear
 - Be specific and concrete - avoid vague generalizations
+
+
+=== OUTPUT FORMATTING (CRITICAL) ===
+
+**ALWAYS format your responses in clean, readable Markdown:**
+
+- Use **headers** (`##`, `###`) to organize sections
+- Use **bullet points** and **numbered lists** for clarity
+- Use **bold** and *italics* for emphasis
+- Wrap ALL code, file paths, function names, and commands in backticks: `example`
+- Use fenced code blocks with language tags for multi-line code:
+
+```python
+def example():
+    return "Use this format for code"
+```
+
+- Use tables when comparing multiple items
+- Keep paragraphs short and scannable
+
+
+=== THINKING OUT LOUD (CRITICAL) ===
+
+**ALWAYS explain your reasoning before calling a tool.** Before each tool call, briefly state:
+- What you're looking for
+- Why you're using that specific tool
+- What you expect to find
+
+For example:
+- "Let me first list the files to understand the repository structure..." → then call list_files()
+- "I'll read the main.py file to see the entry point..." → then call read_file("main.py")
+- "Now I need to search for how authentication is implemented..." → then call rag_search("authentication")
+
+This helps the user follow your reasoning process. Do NOT silently call tools - always provide context first.
 """
 
 def get_system_instruction_wrapper(context_details: str = "") -> str:
@@ -882,6 +942,7 @@ async def chat_with_agent_stream(request: ChatRequest):
             # Accumulate full response for history and tool checking
             full_text = ""
             function_calls = []
+            last_finish_reason = None
             
             # Iterate asynchronously
             async for chunk in response_stream:
@@ -896,20 +957,32 @@ async def chat_with_agent_stream(request: ChatRequest):
                     yield json.dumps({"type": "usage", "usage": usage}) + "\n"
 
                 if not chunk.candidates:
+                    logger.debug("[STREAM] Chunk has no candidates")
                     continue
                 
                 candidate = chunk.candidates[0]
                 
+                # Capture finish reason for debugging
+                if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
+                    last_finish_reason = candidate.finish_reason
+                    logger.info(f"[STREAM] Candidate finish reason: {last_finish_reason}")
+                
                 if not candidate.content or not candidate.content.parts:
+                    logger.debug("[STREAM] Candidate has no content or parts")
                     continue
                 
                 for part in candidate.content.parts:
                     if part.text:
                         full_text += part.text
+                        logger.debug(f"[STREAM] Yielding text token: {part.text[:100]}...")
                         yield json.dumps({"type": "token", "content": part.text}) + "\n"
                     
                     if part.function_call:
+                        logger.debug(f"[STREAM] Found function call: {part.function_call.name}")
                         function_calls.append(part.function_call)
+            
+            # Log summary after stream completes
+            logger.info(f"[STREAM] Turn {current_turn} complete: text_len={len(full_text)}, function_calls={len(function_calls)}, finish_reason={last_finish_reason}")
 
             # If we have function calls, execute them
             if function_calls:
@@ -974,6 +1047,12 @@ async def chat_with_agent_stream(request: ChatRequest):
                     contents.append(types.Content(role="model", parts=[types.Part(text=full_text)]))
                     break
                 
+                # Handle empty response - log details and attempt recovery
+                logger.warning(
+                    f"[STREAM] Empty response on turn {current_turn}. "
+                    f"finish_reason={last_finish_reason}, candidates_present={bool(chunk.candidates if 'chunk' in dir() else False)}"
+                )
+                
                 # Handle empty response after tool call - prompt the model to continue
                 if current_turn > 0:
                     logger.warning("Stream: Empty response after tool call on turn %d, prompting model to continue", current_turn)
@@ -983,6 +1062,37 @@ async def chat_with_agent_stream(request: ChatRequest):
                     ))
                     current_turn += 1
                     continue
+                
+                # First turn empty response - retry once with tools disabled
+                logger.warning("[STREAM] First turn produced no output. Retrying with tools disabled...")
+                retry_config = types.GenerateContentConfig(
+                    tools=[],  # Disable tools to force text generation
+                    temperature=0.7,
+                    system_instruction=config.system_instruction
+                )
+                
+                retry_stream = await client.aio.models.generate_content_stream(
+                    model=request.model,
+                    contents=contents,
+                    config=retry_config
+                )
+                
+                retry_text = ""
+                async for retry_chunk in retry_stream:
+                    if retry_chunk.candidates and retry_chunk.candidates[0].content:
+                        for part in retry_chunk.candidates[0].content.parts:
+                            if part.text:
+                                retry_text += part.text
+                                yield json.dumps({"type": "token", "content": part.text}) + "\n"
+                
+                if retry_text:
+                    logger.info(f"[STREAM] Retry succeeded with {len(retry_text)} chars")
+                    break
+                
+                # Still no response - yield error to frontend
+                error_msg = f"The model returned no response. Finish reason: {last_finish_reason}. This may indicate the input is too long or there's a content filtering issue."
+                logger.error(f"[STREAM] {error_msg}")
+                yield json.dumps({"type": "error", "content": error_msg}) + "\n"
                 break
 
     except Exception as e:
