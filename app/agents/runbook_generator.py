@@ -12,6 +12,7 @@ from ..models import EnvInfo, RepoMap, RAGQueryRequest
 from ..search import perform_hybrid_search
 from google import genai
 import os
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +61,12 @@ async def generate_runbook_content(
     # 3. Construct a context-rich prompt
     repo_name_display = repo_map.detected_name or repo_map.repo_name
     readme_status = "Found" if repo_map.readme_exists else "Not Found"
+    current_date = datetime.now().strftime("%A, %B %d, %Y")
 
     prompt = f"""
 You are an expert DevOps engineer and Technical Writer. Your task is to generate a "Quick Start / Runbook" for a developer who wants to run this repository: '{repo_name_display}'.
+
+Current Date: {current_date}
 
 CONTEXT:
 
@@ -70,7 +74,7 @@ CONTEXT:
 Name: {repo_name_display} (Folder: {repo_map.repo_name})
 README: {readme_status}
 {repo_map.structure}
-Last Updated: {repo_map.last_updated}
+Last Updated: {repo_map.last_updated} (Approximate - inferred from file system or git logs)
 
 2. **Detected Entry Points**:
 {repo_map.entry_points}

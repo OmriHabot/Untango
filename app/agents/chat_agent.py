@@ -418,6 +418,8 @@ THERE IS NO NEED TO READ THE README.md AGAIN WITH YOUR TOOLS SINCE IT'S DISPLAYE
 You have full access to the source code of '{repo_name}' and are answering questions specifically about it.
 
 **Current Date:** {current_date}
+**Note:** The "Last Updated" date provided in the context is approximate and inferred from the file system or git logs.
+
 {readme_section}
 === AUTOMATED CONTEXT ===
 {context_str}
