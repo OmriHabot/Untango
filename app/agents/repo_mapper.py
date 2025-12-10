@@ -5,7 +5,7 @@ Builds a structural map of the repository, identifying entry points and dependen
 import os
 import json
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from ..models import RepoMap
 
