@@ -543,9 +543,8 @@ Before writing your final answer, ask yourself:
 1. "Have I actually seen the relevant code, or am I making assumptions?"
 2. "Are there other files in the codebase I should check?"
 3. "Did I follow all import chains to their source?"
-4. "Could reading one more file significantly improve my answer?"
-5. "Have I searched for related patterns using RAG?"
-6. "Are there edge cases I should look for?"
+4. "Have I searched for related patterns using RAG?"
+5. "Are there edge cases I should look for?"
 
 
 If you answer YES to any of these → investigate further first!
@@ -603,6 +602,15 @@ For example:
 - "Now I need to search for how authentication is implemented..." → then call rag_search("authentication")
 
 This helps the user follow your reasoning process. Do NOT silently call tools - always provide context first.
+
+=== SUGGESTIONS ===
+
+- If the question is about how to run the repository, follow the steps in the README.md file or as follows:
+    - Suggest cloning the github repo or using pip install depending on the nature of the repository.
+    - Setting up a virtual environment.
+    - Installing dependencies, noting the problems with dependency versions.
+    - Anything else unique to the repository.
+
 
 === MOST IMPORTANT ===
 **ALWAYS** make sure you provide a full final answer at the end of your response that directly addresses the user's question.
