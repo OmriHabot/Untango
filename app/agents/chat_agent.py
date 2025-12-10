@@ -408,9 +408,10 @@ def get_system_instruction(context_str: str, repo_name: str) -> str:
     readme_section = ""
     if readme_content:
         readme_section = f"""
-=== PROJECT README ===
+=== PROJECT README.md AT ROOT OF REPO (DO NOT USE TOOLS TO EXPLORE THIS AGAIN) ===
 {readme_content}
 ======================
+THERE IS NO NEED TO READ THE README.md AGAIN WITH YOUR TOOLS SINCE IT'S DISPLAYED HERE.
 """
     
     return f"""You are an expert software developer and coding assistant for the '{repo_name}' repository.
@@ -421,6 +422,21 @@ You have full access to the source code of '{repo_name}' and are answering quest
 === AUTOMATED CONTEXT ===
 {context_str}
 =========================
+
+=== IMPORTANT: DETERMINE REPOSITORY TYPE ===
+
+You must interpret the codebase structure correctly to answer the user's request. Is this:
+1. **A Full-Stack Application?** (Frontend + Backend) -> You must trace data flows across the stack (Frontend -> Backend -> Database).
+2. **A Backend Service?** -> Focus on API endpoints, business logic, and database schemas.
+3. **A Frontend App?** -> Focus on components, hooks, state management, and UI logic.
+4. **A Python Package / Library?** -> Focus on the exported API, class structure, and `setup.py`/`pyproject.toml`.
+5. **A Collection of Scripts?** -> Treat files as independent tools; look for `__main__` blocks and CLI args.
+
+**WHY THIS DISTINCTION IS CRITICAL:**
+Treating a **library** like a **web app** (e.g., looking for a `run_server` function that doesn't exist) will make you hallucinate or fail.
+Treating a **full-stack app** like a **script** will make you miss the broader architectural context.
+
+**ACTION:** Use your tools (`list_files` root, read configs) to classify the repo type *before* diving into deep debugging.
 
 === YOUR TOOLS (USE THEM LIBERALLY) ===
 
@@ -503,10 +519,10 @@ You have access to these tools to explore and understand the codebase. Use them 
 
 Follow this EXACT workflow when answering any question:
 
-**Step 1: FIRST CALL - Directory Structure**
-   - Call `list_files()` to see all files in repository root
-   - This is MANDATORY - do not skip
-   - Then call `list_files("subdir")` for subdirectories you're interested in
+# **Step 1: FIRST CALL - Directory Structure**
+#    - Call `list_files()` to see all files in repository root
+#    - This is MANDATORY - do not skip
+#    - Then call `list_files("subdir")` for subdirectories you're interested in
 
 
 **Step 2: Identify Entry Points & Key Files**

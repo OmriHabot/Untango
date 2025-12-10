@@ -31,9 +31,9 @@ class ContextReport:
         lines = []
         keys = sorted(structure.keys())
         # Limit items per level to avoid context overflow
-        if len(keys) > 50:
-            keys = keys[:50]
-            keys.append("... (truncated)")
+        # if len(keys) > 50:
+        #     keys = keys[:50]
+        #     keys.append("... (truncated)")
             
         for key in keys:
             if key == "... (truncated)":

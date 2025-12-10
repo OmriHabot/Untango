@@ -48,7 +48,7 @@ from .active_repo_state import active_repo_state
 from .search import perform_hybrid_search, perform_vector_search, tokenize_code
 from rank_bm25 import BM25Okapi
 from .logger import setup_logging, get_logger
-from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
+from .agents.mcp_agent import chat_with_mcp_agent, chat_with_mcp_agent_stream
 from .chat_history import chat_history_manager
 from .context_manager import context_manager
 
@@ -696,7 +696,7 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
         if active_repo_id and active_repo_id != "default":
             chat_history_manager.add_message(active_repo_id, request.messages[-1])
 
-    response = await chat_with_agent(request)
+    response = await chat_with_mcp_agent(request)
     
     # Save assistant response
     if active_repo_id and active_repo_id != "default":
@@ -741,7 +741,7 @@ async def chat_stream_endpoint(request: ChatRequest):
         tool_calls = []
         current_tool_call = None
         
-        async for chunk in chat_with_agent_stream(request):
+        async for chunk in chat_with_mcp_agent_stream(request):
             # Capture content for history
             try:
                 # Chunk might be multiple lines or raw NDJSON

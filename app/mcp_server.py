@@ -108,38 +108,28 @@ def list_files(directory: str = ".") -> str:
         return f"Error listing files: {e}"
 
 
-@mcp.tool()
-def execute_command(command: str, timeout: int = 60) -> str:
-    """
-    Execute a shell command in the repository's virtual environment.
-    Auto-creates .venv if it doesn't exist. Only allowlisted commands are permitted.
+# @mcp.tool()
+# def execute_command(command: str, timeout: int = 60) -> str:
+#     """
+#     Suggest a shell command for the user to run manually in their terminal.
+#     This tool does NOT execute commands - it returns the command for the user to copy and run.
     
-    Allowed commands: pytest, pip (list/freeze/show/install), git (status/diff/log),
-    ruff, flake8, mypy, pylint, python scripts, ls, cat, head, tail, grep, find, wc.
+#     Args:
+#         command: The command to suggest (e.g., "pip list", "pytest tests/")
+#         timeout: Unused, kept for API compatibility
+        
+#     Returns:
+#         Formatted suggested command for the user to run manually
+#     """
+#     repo_path = _get_active_repo_path()
     
-    Args:
-        command: The command to execute (e.g., "pip list", "pytest tests/")
-        timeout: Maximum execution time in seconds (default 60)
-        
-    Returns:
-        Command output with exit code and execution details
-    """
-    try:
-        repo_path = _get_active_repo_path()
-        result = shell_execute(command, repo_path=repo_path, timeout=timeout, use_venv=True)
-        
-        output = f"Command: {result.get('command_executed', command)}\n"
-        output += f"Exit Code: {result.get('exit_code', -1)}\n"
-        if result.get('venv_used'):
-            output += "(Executed in virtual environment)\n"
-        output += "\n--- STDOUT ---\n" + result.get('stdout', '')
-        if result.get('stderr'):
-            output += "\n--- STDERR ---\n" + result.get('stderr', '')
-        if result.get('timed_out'):
-            output += f"\n[TIMED OUT after {timeout}s]"
-        return output
-    except Exception as e:
-        return f"Error executing command: {e}"
+#     # Return a formatted message for the frontend to display
+#     output = "📋 **Suggested Command**\n\n"
+#     output += "Please run this command in your terminal:\n\n"
+#     output += f"```bash\ncd {repo_path} && {command}\n```\n\n"
+#     output += "_This command was not executed automatically. Copy and run it in your terminal._"
+    
+#     return output
 
 
 @mcp.tool()
