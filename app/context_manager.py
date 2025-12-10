@@ -66,6 +66,7 @@ class ContextReport:
         report.append(f"Name: {self.repo_map.repo_name}")
         if self.repo_map.detected_name and self.repo_map.detected_name != self.repo_map.repo_name:
             report.append(f"Detected Name: {self.repo_map.detected_name}")
+        report.append(f"Type: {self.repo_map.repo_type}")
         report.append(f"README Exists: {self.repo_map.readme_exists}")
         report.append(f"Last Updated: {self.repo_map.last_updated}")
         report.append(f"Entry Points: {', '.join(self.repo_map.entry_points[:5])}" + 

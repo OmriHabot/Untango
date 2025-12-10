@@ -244,6 +244,49 @@ def detect_repo_name_and_readme(root_path: str) -> tuple[Optional[str], bool]:
 
     return detected_name, readme_exists
 
+def detect_repo_type(root_path: str) -> str:
+    """
+    Detect if the repo is a library (pip installable) or an application (git clone & run).
+    Returns: 'library', 'application', 'script', or 'unknown'
+    """
+    # 1. Check for explicit package definition (Strong signal for Library)
+    if os.path.exists(os.path.join(root_path, 'setup.py')):
+        return "library"
+        
+    if os.path.exists(os.path.join(root_path, 'pyproject.toml')):
+        try:
+            with open(os.path.join(root_path, 'pyproject.toml'), 'r') as f:
+                content = f.read()
+                if '[build-system]' in content or '[tool.poetry]' in content:
+                    return "library"
+        except Exception:
+            pass
+
+    # 2. Check for Application signals
+    app_indicators = ['Dockerfile', 'docker-compose.yml', 'manage.py', 'wsgi.py', 'asgi.py']
+    for indicator in app_indicators:
+        if os.path.exists(os.path.join(root_path, indicator)):
+            return "application"
+            
+    # 3. Check for Node.js App vs Lib
+    if os.path.exists(os.path.join(root_path, 'package.json')):
+        try:
+            with open(os.path.join(root_path, 'package.json'), 'r') as f:
+                data = json.load(f)
+                if 'scripts' in data and 'start' in data['scripts']:
+                    return "application"
+                if 'main' in data: # likely a lib if it has main but no start? ambiguous.
+                    pass 
+        except Exception:
+            pass
+
+    # 4. Fallback: Check structure
+    # If it has requirements.txt but no setup.py, it's likely an app
+    if os.path.exists(os.path.join(root_path, 'requirements.txt')):
+        return "application"
+
+    return "unknown"
+
 
 def map_repo(repo_path: str, repo_name: str) -> RepoMap:
     """Generate a full repository map."""
@@ -254,8 +297,9 @@ def map_repo(repo_path: str, repo_name: str) -> RepoMap:
     dependencies = parse_dependencies(repo_path)
     last_updated = get_last_updated_date(repo_path)
     detected_name, readme_exists = detect_repo_name_and_readme(repo_path)
+    repo_type = detect_repo_type(repo_path)
     
-    logger.info(f"Repo Map Complete: {len(entry_points)} entry points found. Last updated: {last_updated}. README: {readme_exists}")
+    logger.info(f"Repo Map Complete: {len(entry_points)} entry points found. Type: {repo_type}. Last updated: {last_updated}. README: {readme_exists}")
     
     return RepoMap(
         repo_name=repo_name,
@@ -265,5 +309,6 @@ def map_repo(repo_path: str, repo_name: str) -> RepoMap:
         dependencies=dependencies,
         last_updated=last_updated,
         readme_exists=readme_exists,
-        detected_name=detected_name
+        detected_name=detected_name,
+        repo_type=repo_type
     )

@@ -72,6 +72,7 @@ CONTEXT:
 
 1. **Repository Structure**:
 Name: {repo_name_display} (Folder: {repo_map.repo_name})
+Type: {repo_map.repo_type}
 README: {readme_status}
 {repo_map.structure}
 Last Updated: {repo_map.last_updated} (Approximate - inferred from file system or git logs)
@@ -100,6 +101,9 @@ Create a Markdown runbook (`RUNBOOK.md`) that explains:
    - If the dependency version is different from the required version, warn the user that dependencies might be outdated or incompatible with modern Python versions.
    - **Time Rot Warning**: If the "Last Updated" date is old (e.g. > 1 year), warn the user that dependencies might be outdated or incompatible with modern Python versions.
 3. **Setup**: 
+   - **CRITICAL**: Check the "Type" above.
+     - If **Type: library**: Suggest installing via pip (`pip install {repo_name_display}`) if it looks like a public package. Alternatively, suggest `pip install .` for local development. Do NOT suggest `git clone` as the primary usage unless the user intends to modify source.
+     - If **Type: application**: Suggest `git clone` (if not already cloned) and `pip install -r requirements.txt` (or equivalent).
    - Provide the suggested commands to install dependencies.
    - Use the "Retrieved Setup Instructions" to find the correct commands (e.g. `pip install -r requirements.txt` vs `poetry install`).
    - Provide the suggested commands to update the dependencies that may be outdated, and label it as optional.

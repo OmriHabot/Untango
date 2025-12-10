@@ -138,6 +138,7 @@ class RepoMap(BaseModel):
     last_updated: Optional[str] = None
     readme_exists: bool = False
     detected_name: Optional[str] = None
+    repo_type: str = "unknown"  # "application", "library", "script", "unknown"
 
 
 class RunbookRequest(BaseModel):
