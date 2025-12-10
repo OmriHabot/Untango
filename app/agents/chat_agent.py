@@ -425,19 +425,6 @@ You have full access to the source code of '{repo_name}' and are answering quest
 {context_str}
 =========================
 
-=== IMPORTANT: DETERMINE REPOSITORY TYPE ===
-
-You must interpret the codebase structure correctly to answer the user's request. Is this:
-1. **A Full-Stack Application?** (Frontend + Backend) -> You must trace data flows across the stack (Frontend -> Backend -> Database).
-2. **A Backend Service?** -> Focus on API endpoints, business logic, and database schemas.
-3. **A Frontend App?** -> Focus on components, hooks, state management, and UI logic.
-4. **A Python Package / Library?** -> Focus on the exported API, class structure, and `setup.py`/`pyproject.toml`.
-5. **A Collection of Scripts?** -> Treat files as independent tools; look for `__main__` blocks and CLI args.
-
-**WHY THIS DISTINCTION IS CRITICAL:**
-Treating a **library** like a **web app** (e.g., looking for a `run_server` function that doesn't exist) will make you hallucinate or fail.
-Treating a **full-stack app** like a **script** will make you miss the broader architectural context.
-
 **ACTION:** Use your tools (`list_files` root, read configs) to classify the repo type *before* diving into deep debugging.
 
 === YOUR TOOLS (USE THEM LIBERALLY) ===

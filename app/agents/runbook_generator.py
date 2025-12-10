@@ -73,7 +73,8 @@ CONTEXT:
 1. **Repository Structure**:
 Name: {repo_name_display} (Folder: {repo_map.repo_name})
 Type: {repo_map.repo_type}
-README: {readme_status}
+Last Updated: {repo_map.last_updated} (Approximate)
+Structure:
 {repo_map.structure}
 Last Updated: {repo_map.last_updated} (Approximate - inferred from file system or git logs)
 
@@ -100,18 +101,14 @@ Create a Markdown runbook (`RUNBOOK.md`) that explains:
    - List required tools.
    - If the dependency version is different from the required version, warn the user that dependencies might be outdated or incompatible with modern Python versions.
    - **Time Rot Warning**: If the "Last Updated" date is old (e.g. > 1 year), warn the user that dependencies might be outdated or incompatible with modern Python versions.
-3. **Setup**: 
-   - **CRITICAL**: Check the "Type" above.
-     - If **Type: library**: Suggest installing via pip (`pip install {repo_name_display}`) if it looks like a public package. Alternatively, suggest `pip install .` for local development. Do NOT suggest `git clone` as the primary usage unless the user intends to modify source.
-     - If **Type: application**: Suggest `git clone` (if not already cloned) and `pip install -r requirements.txt` (or equivalent).
-   - Provide the suggested commands to install dependencies.
-   - Use the "Retrieved Setup Instructions" to find the correct commands (e.g. `pip install -r requirements.txt` vs `poetry install`).
-   - Provide the suggested commands to update the dependencies that may be outdated, and label it as optional.
-   - Address environment limitations (e.g. if CUDA is missing).
-4. **Execution**: 
-   - Provide the suggested commands to run the repository after updating the dependencies.
+3. **Setup**:
+   - **If Type=library**: Suggest `pip install {repo_name_display}` (public) or `pip install .` (local). Avoid `git clone` unless dev.
+   - **If Type=application**: Suggest `git clone` + install deps (e.g., `pip install -r requirements.txt`).
+   - Use "Ref Docs" for specific commands.
+   - Address env issues (e.g., missing CUDA).
+4. **Execution**: Commands to run/test.
 
-Keep it concise, actionable, and specific to the provided file structure.
+Style: Concise, actionable, Markdown.
 """
 
     # 4. Call Vertex AI
