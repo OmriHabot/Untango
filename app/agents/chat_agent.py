@@ -408,7 +408,7 @@ def get_system_instruction(context_str: str, repo_name: str) -> str:
     readme_section = ""
     if readme_content:
         readme_section = f"""
-=== PROJECT README.md AT ROOT OF REPO (DO NOT USE TOOLS TO EXPLORE THIS AGAIN) ===
+=== PROJECT README.md AT ROOT OF REPO ===
 {readme_content}
 ======================
 THERE IS NO NEED TO READ THE README.md AGAIN WITH YOUR TOOLS SINCE IT'S DISPLAYED HERE.
@@ -420,7 +420,9 @@ You have full access to the source code of '{repo_name}' and are answering quest
 **Current Date:** {current_date}
 **Note:** The "Last Updated" date provided in the context is approximate and inferred from the file system or git logs.
 
+The readme is displayed here if it exists, you do not need to use tools to explore it again:
 {readme_section}
+
 === AUTOMATED CONTEXT ===
 {context_str}
 =========================
@@ -429,7 +431,7 @@ You have full access to the source code of '{repo_name}' and are answering quest
 
 === YOUR TOOLS (USE THEM LIBERALLY) ===
 
-You have access to these tools to explore and understand the codebase. Use them extensively!
+You have access to these tools to explore and understand the codebase. Use them whenever you need to or in doubt.
 
 **1. list_files(directory=".")**
    - Lists all files and subdirectories in a directory
@@ -503,53 +505,7 @@ You have access to these tools to explore and understand the codebase. Use them 
    - Find all places a function is defined and called
    - Uses AST analysis for accurate results
 
-
-=== EXPLORATION WORKFLOW (CRITICAL) ===
-
-Follow this EXACT workflow when answering any question:
-
-# **Step 1: FIRST CALL - Directory Structure**
-#    - Call `list_files()` to see all files in repository root
-#    - This is MANDATORY - do not skip
-#    - Then call `list_files("subdir")` for subdirectories you're interested in
-
-
-**Step 2: Identify Entry Points & Key Files**
-   - main.py, app.py, index.js, __init__.py
-   - README.md for project overview and setup instructions
-   - config.py, settings.py, .env.example for configuration
-   - requirements.txt, pyproject.toml, package.json for dependencies
-
-
-**Step 3: Systematic Exploration**
-   - When you see imports, read those files to understand dependencies
-   - When you find a function call, search for its definition
-   - When you see a class, read its full implementation
-   - Follow the import chain completely - don't assume based on naming
-
-
-**Step 4: Pattern Discovery**
-   - Use `rag_search` to find all usages of specific functions/classes
-   - Search for error messages and exception handling
-   - Look for configuration keys and API endpoints
-   - Search for decorators and special patterns
-
-
-**Step 5: Comprehensive Context Building**
-   - Read tests to understand expected behavior (often more reliable than comments)
-   - Read documentation and docstrings for intent and usage
-   - Read config files to understand available options
-   - Cross-reference related files
-
-
-**Step 6: Verify Understanding**
-   - Once you have information, search for edge cases or alternative implementations
-   - Look for comments explaining non-obvious logic
-   - Check for error handling and validation
-
-
 === AGGRESSIVE EXPLORATION PRINCIPLE ===
-
 **DO NOT GIVE UP EARLY.** If you don't find what you need:
 
 - **Try different search terms** - Rephrase and use `rag_search` with different keywords
@@ -579,9 +535,6 @@ You have unlimited tool calls. Exploration is free. Keep going until you're conf
 - NEVER say "I would need to see..." - Just read the file with your tools!
 - NEVER guess what a file contains - Always read it first
 - NEVER assume anything based on filename alone - Verify by reading
-- NEVER give incomplete answers when exploring would only take one more tool call
-- NEVER skip the initial `list_files()` step
-
 
 === SELF-VERIFICATION CHECKLIST ===
 
@@ -642,14 +595,17 @@ def example():
 **ALWAYS explain your reasoning before calling a tool.** Before each tool call, briefly state:
 - What you're looking for
 - Why you're using that specific tool
-- What you expect to find
+- Be brief and to the point.
 
 For example:
-- "Let me first list the files to understand the repository structure..." → then call list_files()
+- "Let me list the files to understand the repository structure..." → then call list_files()
 - "I'll read the main.py file to see the entry point..." → then call read_file("main.py")
 - "Now I need to search for how authentication is implemented..." → then call rag_search("authentication")
 
 This helps the user follow your reasoning process. Do NOT silently call tools - always provide context first.
+
+=== MOST IMPORTANT ===
+**ALWAYS** make sure you provide a full final answer at the end of your response that directly addresses the user's question.
 """
 
 def get_system_instruction_wrapper(context_details: str = "") -> str:
