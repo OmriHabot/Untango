@@ -109,6 +109,10 @@ Create a Markdown runbook (`RUNBOOK.md`) that explains:
 4. **Execution**: Commands to run/test.
 
 Style: Concise, actionable, Markdown.
+**IMPORTANT**:
+- Be brief but include all necessary information. Do not include generic filler text.
+- Do not repeat the same instructions.
+
 """
 
     # 4. Call Vertex AI
