@@ -229,6 +229,8 @@ class RepositorySummary(BaseModel):
     repo_id: str
     name: str
     path: str
+    source_type: Optional[str] = None
+    source_location: Optional[str] = None
 
 
 class ListRepositoriesResponse(BaseModel):

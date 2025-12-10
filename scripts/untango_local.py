@@ -32,8 +32,9 @@ except ImportError:
 INCLUDE_EXTENSIONS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.md', '.txt', '.json', '.yaml', '.yml', '.html', '.css', '.ipynb'}
 
 # Directories to skip
+# Note: .git is NOT skipped - we want to include it so git tools work on ingested repos
 # Note: .venv and venv are NOT skipped - we want to include virtual environments
-SKIP_DIRS = {'.git', '__pycache__', 'node_modules', '.repos', 'dist', 'build', '.next'}
+SKIP_DIRS = {'__pycache__', 'node_modules', '.repos', 'dist', 'build', '.next'}
 
 
 def find_venv_python(repo_path: str) -> Optional[str]:
@@ -60,9 +61,14 @@ def get_file_hashes(repo_path: str) -> Dict[str, str]:
         # Skip ignored directories
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         
+        # Check if we're inside .git directory
+        rel_root = os.path.relpath(root, repo_path)
+        is_inside_git = rel_root == '.git' or rel_root.startswith('.git' + os.sep)
+        
         for file in files:
             ext = os.path.splitext(file)[1].lower()
-            if ext in INCLUDE_EXTENSIONS:
+            # Include all files inside .git, otherwise check extension
+            if is_inside_git or ext in INCLUDE_EXTENSIONS:
                 filepath = os.path.join(root, file)
                 rel_path = os.path.relpath(filepath, repo_path)
                 try:
@@ -81,9 +87,14 @@ def get_repo_files(repo_path: str) -> List[str]:
     for root, dirs, filenames in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         
+        # Check if we're inside .git directory
+        rel_root = os.path.relpath(root, repo_path)
+        is_inside_git = rel_root == '.git' or rel_root.startswith('.git' + os.sep)
+        
         for file in filenames:
             ext = os.path.splitext(file)[1].lower()
-            if ext in INCLUDE_EXTENSIONS:
+            # Include all files inside .git, otherwise check extension
+            if is_inside_git or ext in INCLUDE_EXTENSIONS:
                 filepath = os.path.join(root, file)
                 rel_path = os.path.relpath(filepath, repo_path)
                 files.append(rel_path)

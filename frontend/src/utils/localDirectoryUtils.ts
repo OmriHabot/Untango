@@ -15,9 +15,10 @@ const INCLUDE_EXTENSIONS = new Set([
 ]);
 
 // Directories to skip
+// Note: .git is NOT skipped - we need it for git tools to work
 // Note: .venv and venv are NOT skipped - we want to include virtual environments
 const SKIP_DIRS = new Set([
-  '.git', '__pycache__', 'node_modules', 
+  '__pycache__', 'node_modules', 
   '.repos', 'dist', 'build', '.next', '.pytest_cache', 
   '.mypy_cache', 'egg-info', '.tox', '.coverage'
 ]);
@@ -76,19 +77,30 @@ function shouldIncludeFile(filename: string): boolean {
  * Check if a directory should be skipped
  */
 function shouldSkipDirectory(name: string): boolean {
-  // Also skip hidden directories (except .venv which we explicitly list)
-  if (name.startsWith('.') && !SKIP_DIRS.has(name)) {
+  // Explicitly skip these directories
+  if (SKIP_DIRS.has(name)) {
     return true;
   }
-  return SKIP_DIRS.has(name);
+  
+  // Hidden directories that we WANT to include
+  const INCLUDE_HIDDEN_DIRS = new Set(['.git', '.venv', '.env']);
+  
+  // Skip hidden directories by default, except those we explicitly want
+  if (name.startsWith('.') && !INCLUDE_HIDDEN_DIRS.has(name)) {
+    return true;
+  }
+  
+  return false;
 }
 
 /**
  * Recursively scan a directory and collect files
+ * @param isInsideGitDir - If true, include ALL files (for .git directory)
  */
 export async function scanDirectory(
   dirHandle: FileSystemDirectoryHandle,
-  basePath: string = ''
+  basePath: string = '',
+  isInsideGitDir: boolean = false
 ): Promise<ScannedFile[]> {
   const files: ScannedFile[] = [];
 
@@ -98,11 +110,14 @@ export async function scanDirectory(
     if (entry.kind === 'directory') {
       if (!shouldSkipDirectory(entry.name)) {
         const subHandle = await dirHandle.getDirectoryHandle(entry.name);
-        const subFiles = await scanDirectory(subHandle, entryPath);
+        // Track if we're entering a .git directory
+        const enteringGitDir = entry.name === '.git' || isInsideGitDir;
+        const subFiles = await scanDirectory(subHandle, entryPath, enteringGitDir);
         files.push(...subFiles);
       }
     } else if (entry.kind === 'file') {
-      if (shouldIncludeFile(entry.name)) {
+      // Include all files inside .git, otherwise check extension
+      if (isInsideGitDir || shouldIncludeFile(entry.name)) {
         const fileHandle = await dirHandle.getFileHandle(entry.name);
         const file = await fileHandle.getFile();
         files.push({ path: entryPath, file });

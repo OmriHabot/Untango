@@ -917,10 +917,35 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                     break
                 
                 # Handle empty response - log details and attempt recovery
+                is_malformed = last_finish_reason and "MALFORMED" in str(last_finish_reason)
                 logger.warning(
                     f"[STREAM] Empty response on turn {current_turn}. "
-                    f"finish_reason={last_finish_reason}, candidates_present={bool(chunk.candidates if 'chunk' in dir() else False)}"
+                    f"finish_reason={last_finish_reason}, is_malformed={is_malformed}, "
+                    f"candidates_present={bool(chunk.candidates if 'chunk' in dir() else False)}"
                 )
+                
+                # Track consecutive empty response retries to avoid infinite loops
+                empty_response_retries = getattr(chat_with_mcp_agent_stream, '_empty_retries', 0)
+                max_empty_retries = 3
+                
+                if empty_response_retries >= max_empty_retries:
+                    logger.error(f"[STREAM] Max empty response retries ({max_empty_retries}) reached. Giving up.")
+                    error_msg = f"The model returned empty responses after {max_empty_retries} retries. Finish reason: {last_finish_reason}."
+                    yield json.dumps({"type": "error", "content": error_msg}) + "\n"
+                    break
+                
+                # Increment retry counter
+                chat_with_mcp_agent_stream._empty_retries = empty_response_retries + 1
+                
+                # Handle MALFORMED_FUNCTION_CALL specifically - the model tried to call a function but failed
+                if is_malformed:
+                    logger.warning(f"[STREAM] Malformed function call detected on turn {current_turn}. Prompting model to retry properly.")
+                    contents.append(types.Content(
+                        role="user", 
+                        parts=[types.Part(text="Your previous function call was malformed. Please try again with a properly formatted function call, or provide a text response if you have enough information to answer.")]
+                    ))
+                    current_turn += 1
+                    continue
                 
                 # Handle empty response after tool call - prompt the model to continue
                 if current_turn > 0:
@@ -942,8 +967,8 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                 ))
                 current_turn += 1
                 
-                # If we've already retried, try without tools
-                if current_turn > 2:
+                # If we've already retried multiple times, try without tools
+                if current_turn > 2 and empty_response_retries >= 2:
                     logger.warning("[STREAM] Multiple retries failed. Trying with tools disabled...")
                     retry_config = types.GenerateContentConfig(
                         tools=[],  # Disable tools to force text generation
@@ -967,6 +992,8 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                     
                     if retry_text:
                         logger.info(f"[STREAM] Retry succeeded with {len(retry_text)} chars")
+                        # Reset retry counter on success
+                        chat_with_mcp_agent_stream._empty_retries = 0
                         break
                     
                     # Still no response - yield error to frontend
@@ -976,6 +1003,9 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                     break
                 
                 continue
+        
+        # Reset retry counter at end of successful stream
+        chat_with_mcp_agent_stream._empty_retries = 0
 
     except Exception as e:
         logger.exception("Chat stream failed")
