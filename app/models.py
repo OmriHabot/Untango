@@ -136,6 +136,8 @@ class RepoMap(BaseModel):
     entry_points: List[str]
     dependencies: List[str]
     last_updated: Optional[str] = None
+    readme_exists: bool = False
+    detected_name: Optional[str] = None
 
 
 class RunbookRequest(BaseModel):

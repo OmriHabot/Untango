@@ -742,7 +742,10 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         # Get Automated Context Report
         context_report = context_manager.get_context_report()
         context_str = context_report.to_string() if context_report else "Context not initialized yet."
-        repo_name = context_report.repo_map.repo_name if context_report else "Unknown Repo"
+        
+        repo_name = "Unknown Repo"
+        if context_report:
+            repo_name = context_report.repo_map.detected_name or context_report.repo_map.repo_name
 
         # Fetch tools dynamically from MCP server
         mcp_tools = await get_cached_mcp_tools()

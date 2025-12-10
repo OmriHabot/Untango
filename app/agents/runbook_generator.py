@@ -58,12 +58,17 @@ async def generate_runbook_content(
         ])
 
     # 3. Construct a context-rich prompt
+    repo_name_display = repo_map.detected_name or repo_map.repo_name
+    readme_status = "Found" if repo_map.readme_exists else "Not Found"
+
     prompt = f"""
-You are an expert DevOps engineer and Technical Writer. Your task is to generate a "Quick Start / Runbook" for a developer who wants to run this repository.
+You are an expert DevOps engineer and Technical Writer. Your task is to generate a "Quick Start / Runbook" for a developer who wants to run this repository: '{repo_name_display}'.
 
 CONTEXT:
 
 1. **Repository Structure**:
+Name: {repo_name_display} (Folder: {repo_map.repo_name})
+README: {readme_status}
 {repo_map.structure}
 Last Updated: {repo_map.last_updated}
 
