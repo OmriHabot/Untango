@@ -611,7 +611,7 @@ function QualitativeDemo() {
                     query, 
                     n_results: 5,
                     bm25_score_threshold: 10000.0, // Effectively disable BM25
-                    model: 'gemini-3.0-flash'
+                    model: 'gemini-3-pro-preview'
                 })
             }).then(r => r.json());
 
@@ -622,7 +622,7 @@ function QualitativeDemo() {
                 body: JSON.stringify({ 
                     query, 
                     n_results: 5,
-                    model: 'gemini-3.0-flash'
+                    model: 'gemini-3-pro-preview'
                 })
             }).then(r => r.json());
 
@@ -873,7 +873,7 @@ function AgenticComparisonDemo() {
                 body: JSON.stringify({ 
                     query, 
                     n_results: 5,
-                    model: 'gemini-3.0-flash'
+                    model: 'gemini-3-pro-preview'
                 })
             }).then(r => r.json());
 
@@ -883,7 +883,7 @@ function AgenticComparisonDemo() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     messages: [{ role: 'user', content: query }],
-                    model: 'gemini-3.0-flash'
+                    model: 'gemini-3-pro-preview'
                 })
             }).then(r => r.json());
 

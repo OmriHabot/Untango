@@ -25,7 +25,7 @@ async def generate_runbook_content(
     dependency_analysis: List[DependencyStatus],
     project_id: str, 
     location: str,
-    model: str = "gemini-3.0-flash"
+    model: str = "gemini-3-pro-preview"
 ) -> str:
     """
     Generate the runbook content using LLM with RAG and Dependency Analysis.
@@ -120,7 +120,7 @@ Style: Concise, actionable, Markdown.
     # 4. Call Vertex AI
     
     # Fallback models in order
-    FALLBACK_MODELS = ["gemini-3.0-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+    FALLBACK_MODELS = ["gemini-3-pro-preview-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
     models_to_try = [model] + FALLBACK_MODELS
     # Remove duplicates
     unique_models = []

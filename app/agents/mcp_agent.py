@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # MCP server URL
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8001/mcp")
 
-# Pricing for gemini-3.0-flash (per million tokens)
+# Pricing for gemini-3-pro-preview (per million tokens)
 INPUT_PRICE_PER_MILLION = 0.30  # $0.30 per million tokens
 OUTPUT_PRICE_PER_MILLION = 2.50  # $2.50 per million tokens
 

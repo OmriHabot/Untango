@@ -107,7 +107,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   clearChat: () => set({ messages: [] }),
 
-  sendMessage: async (content: string, model = 'gemini-2.5-flash') => {
+  sendMessage: async (content: string, model = 'gemini-3-pro-preview') => {
     const { addMessage, updateLastMessage } = get();
     
     // Add user message
@@ -135,7 +135,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     addMessage(modelMsg);
 
     // Fallback models in order
-    const FALLBACK_MODELS = ['gemini-3.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+    const FALLBACK_MODELS = ['gemini-3-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
     const modelsToTry = [model, ...FALLBACK_MODELS];
     // Remove duplicates in case the requested model is one of the fallbacks
     const uniqueModels = [...new Set(modelsToTry)];
