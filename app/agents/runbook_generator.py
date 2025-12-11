@@ -94,19 +94,21 @@ Use these snippets as ground truth for commands if relevant:
 - Python: {env_info.python_version}
 - GPU/CUDA: {env_info.gpu_info} (Available: {env_info.cuda_available})
 
-TASK:
+IMPORTANT!!! TASK:
 Create a Markdown runbook (`RUNBOOK.md`) that explains:
 1. What is the purpose of this repository?
 2. **Prerequisites**: 
-   - List required tools.
+   - List required system info (e.g., OS, Python, GPU/CUDA) and suggest if your current system can run this repository. Analyze the need for GPU.
+   - List required dependencies and if you need to address any dependency issues.
    - If the dependency version is different from the required version, warn the user that dependencies might be outdated or incompatible with modern Python versions.
    - **Time Rot Warning**: If the "Last Updated" date is old (e.g. > 1 year), warn the user that dependencies might be outdated or incompatible with modern Python versions.
 3. **Setup**:
    - **If Type=library**: Suggest `pip install {repo_name_display}` (public) or `pip install .` (local). Avoid `git clone` unless dev.
    - **If Type=application**: Suggest `git clone` + install deps (e.g., `pip install -r requirements.txt`).
-   - Use "Ref Docs" for specific commands.
-   - Address env issues (e.g., missing CUDA).
-4. **Execution**: Commands to run/test.
+   - Be specific about the libraries to install and the commands to run. e.g. if there is a requirements.txt, just run `pip install -r requirements.txt`. Else, give instructions to install what dependencies are needed.
+4. **Execution**: 
+    - Commands to run/test.
+    - Use your thinking to determine the best way to run the application.
 
 Style: Concise, actionable, Markdown.
 **IMPORTANT**:
