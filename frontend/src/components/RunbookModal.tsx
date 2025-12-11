@@ -97,13 +97,67 @@ export const RunbookModal: React.FC<Props> = ({ onClose }) => {
               <p className="text-xs">This may take a minute.</p>
             </div>
           ) : runbook ? (
-            <div className="prose prose-invert prose-sm max-w-none">
+            <div className="max-w-none">
               <ReactMarkdown
                 components={{
+                  // Headers with explicit sizing
+                  h1: ({ children, ...props }: any) => (
+                    <h1 className="text-2xl font-bold text-white mt-6 mb-4 first:mt-0" {...props}>{children}</h1>
+                  ),
+                  h2: ({ children, ...props }: any) => (
+                    <h2 className="text-xl font-semibold text-white mt-5 mb-3 first:mt-0" {...props}>{children}</h2>
+                  ),
+                  h3: ({ children, ...props }: any) => (
+                    <h3 className="text-lg font-semibold text-slate-100 mt-4 mb-2 first:mt-0" {...props}>{children}</h3>
+                  ),
+                  h4: ({ children, ...props }: any) => (
+                    <h4 className="text-base font-semibold text-slate-200 mt-3 mb-2 first:mt-0" {...props}>{children}</h4>
+                  ),
+                  h5: ({ children, ...props }: any) => (
+                    <h5 className="text-sm font-semibold text-slate-200 mt-2 mb-1 first:mt-0" {...props}>{children}</h5>
+                  ),
+                  h6: ({ children, ...props }: any) => (
+                    <h6 className="text-sm font-medium text-slate-300 mt-2 mb-1 first:mt-0" {...props}>{children}</h6>
+                  ),
+                  // Paragraphs
+                  p: ({ children, ...props }: any) => (
+                    <p className="text-slate-300 mb-3 last:mb-0 leading-relaxed" {...props}>{children}</p>
+                  ),
+                  // Lists
+                  ul: ({ children, ...props }: any) => (
+                    <ul className="list-disc list-inside mb-3 space-y-1 text-slate-300" {...props}>{children}</ul>
+                  ),
+                  ol: ({ children, ...props }: any) => (
+                    <ol className="list-decimal list-inside mb-3 space-y-1 text-slate-300" {...props}>{children}</ol>
+                  ),
+                  li: ({ children, ...props }: any) => (
+                    <li className="text-slate-300" {...props}>{children}</li>
+                  ),
+                  // Links
+                  a: ({ children, href, ...props }: any) => (
+                    <a href={href} className="text-purple-400 hover:text-purple-300 underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+                  ),
+                  // Blockquotes
+                  blockquote: ({ children, ...props }: any) => (
+                    <blockquote className="border-l-4 border-purple-500 pl-4 my-3 italic text-slate-400" {...props}>{children}</blockquote>
+                  ),
+                  // Horizontal rule
+                  hr: (props: any) => (
+                    <hr className="border-slate-700 my-4" {...props} />
+                  ),
+                  // Strong/Bold
+                  strong: ({ children, ...props }: any) => (
+                    <strong className="font-semibold text-white" {...props}>{children}</strong>
+                  ),
+                  // Emphasis/Italic
+                  em: ({ children, ...props }: any) => (
+                    <em className="italic text-slate-200" {...props}>{children}</em>
+                  ),
+                  // Code blocks
                   code({ node, inline, className, children, ...props }: any) {
                     const match = /language-(\w+)/.exec(className || '');
                     return !inline && match ? (
-                      <div className="rounded-md overflow-hidden my-2 border border-slate-700">
+                      <div className="rounded-md overflow-hidden my-3 border border-slate-700">
                         <div className="bg-slate-900 px-4 py-1 text-xs text-slate-400 border-b border-slate-700 flex justify-between items-center">
                           <span>{match[1]}</span>
                         </div>
@@ -118,11 +172,26 @@ export const RunbookModal: React.FC<Props> = ({ onClose }) => {
                         </SyntaxHighlighter>
                       </div>
                     ) : (
-                      <code className="bg-slate-800 px-1 py-0.5 rounded text-purple-300 font-mono text-sm" {...props}>
+                      <code className="bg-slate-800 px-1.5 py-0.5 rounded text-purple-300 font-mono text-sm" {...props}>
                         {children}
                       </code>
                     );
-                  }
+                  },
+                  // Tables
+                  table: ({ children, ...props }: any) => (
+                    <div className="overflow-x-auto my-3">
+                      <table className="min-w-full border border-slate-700 text-sm" {...props}>{children}</table>
+                    </div>
+                  ),
+                  thead: ({ children, ...props }: any) => (
+                    <thead className="bg-slate-800" {...props}>{children}</thead>
+                  ),
+                  th: ({ children, ...props }: any) => (
+                    <th className="border border-slate-700 px-3 py-2 text-left font-semibold text-slate-200" {...props}>{children}</th>
+                  ),
+                  td: ({ children, ...props }: any) => (
+                    <td className="border border-slate-700 px-3 py-2 text-slate-300" {...props}>{children}</td>
+                  ),
                 }}
               >
                 {runbook}
