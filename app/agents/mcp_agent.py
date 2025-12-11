@@ -802,6 +802,11 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
 
         max_turns = 15
         current_turn = 0
+        # Local retry counters (avoid static function attributes for concurrent requests)
+        malformed_retries = 0
+        max_malformed_retries = 3
+        empty_response_retries = 0
+        max_empty_retries = 3
         
         while current_turn < max_turns:
             # Stream the response using async client
@@ -813,7 +818,9 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
 
             # Accumulate full response for history and tool checking
             full_text = ""
-            function_calls = []
+            # Store original Part objects to preserve thought_signature for Gemini 3 Pro
+            collected_parts = []  # List of original Part objects from the response
+            function_call_parts = []  # Original parts containing function calls (preserves thought_signature)
             last_finish_reason = None
             
             # Iterate asynchronously
@@ -844,6 +851,9 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                     continue
                 
                 for part in candidate.content.parts:
+                    # Collect all parts to preserve the original structure including thought_signature
+                    collected_parts.append(part)
+                    
                     if part.text:
                         full_text += part.text
                         logger.debug(f"[STREAM] Yielding text token: {part.text[:100]}...")
@@ -851,25 +861,32 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                     
                     if part.function_call:
                         logger.debug(f"[STREAM] Found function call: {part.function_call.name}")
-                        function_calls.append(part.function_call)
+                        # Store the ORIGINAL Part object, not just the function_call
+                        # This preserves the thought_signature required by Gemini 3 Pro
+                        function_call_parts.append(part)
             
             # Log summary after stream completes
-            logger.info(f"[STREAM] Turn {current_turn} complete: text_len={len(full_text)}, function_calls={len(function_calls)}, finish_reason={last_finish_reason}")
+            logger.info(f"[STREAM] Turn {current_turn} complete: text_len={len(full_text)}, function_calls={len(function_call_parts)}, finish_reason={last_finish_reason}")
 
             # If we have function calls, execute them
-            if function_calls:
-                # Add the model's response (with function calls) to history
+            if function_call_parts:
+                # Add the model's response to history - use collected_parts directly
+                # This preserves thought_signature which is REQUIRED by Gemini 3 Pro
+                # If we have text + function calls, we need to build parts properly
                 model_parts = []
                 if full_text:
+                    # Add text part if we accumulated text
                     model_parts.append(types.Part(text=full_text))
-                for fc in function_calls:
-                    model_parts.append(types.Part(function_call=fc))
+                # Add ORIGINAL function call parts (preserves thought_signature)
+                model_parts.extend(function_call_parts)
                 
                 contents.append(types.Content(role="model", parts=model_parts))
                 
                 tool_outputs = []
                 
-                for call in function_calls:
+                # Iterate over the original parts to execute function calls
+                for part in function_call_parts:
+                    call = part.function_call
                     fn_name = call.name
                     fn_args = call.args
                     
@@ -907,6 +924,8 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                 # Append tool outputs to history
                 contents.append(types.Content(role="user", parts=tool_outputs))
                 current_turn += 1
+                # Reset malformed retry counter on successful tool execution
+                malformed_retries = 0
                 # Continue loop to get next response from model
                 continue
             
@@ -925,9 +944,6 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                 )
                 
                 # Track consecutive empty response retries to avoid infinite loops
-                empty_response_retries = getattr(chat_with_mcp_agent_stream, '_empty_retries', 0)
-                max_empty_retries = 3
-                
                 if empty_response_retries >= max_empty_retries:
                     logger.error(f"[STREAM] Max empty response retries ({max_empty_retries}) reached. Giving up.")
                     error_msg = f"The model returned empty responses after {max_empty_retries} retries. Finish reason: {last_finish_reason}."
@@ -935,11 +951,17 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                     break
                 
                 # Increment retry counter
-                chat_with_mcp_agent_stream._empty_retries = empty_response_retries + 1
+                empty_response_retries += 1
                 
                 # Handle MALFORMED_FUNCTION_CALL specifically - the model tried to call a function but failed
                 if is_malformed:
-                    logger.warning(f"[STREAM] Malformed function call detected on turn {current_turn}. Prompting model to retry properly.")
+                    malformed_retries += 1
+                    if malformed_retries >= max_malformed_retries:
+                        logger.error(f"[STREAM] Max malformed function call retries ({max_malformed_retries}) reached. Giving up.")
+                        yield json.dumps({"type": "error", "content": f"The model produced {max_malformed_retries} consecutive malformed function calls. Please try rephrasing your question."}) + "\n"
+                        break
+                    
+                    logger.warning(f"[STREAM] Malformed function call detected on turn {current_turn} (retry {malformed_retries}/{max_malformed_retries}). Prompting model to retry properly.")
                     contents.append(types.Content(
                         role="user", 
                         parts=[types.Part(text="Your previous function call was malformed. Please try again with a properly formatted function call, or provide a text response if you have enough information to answer.")]
@@ -992,8 +1014,7 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                     
                     if retry_text:
                         logger.info(f"[STREAM] Retry succeeded with {len(retry_text)} chars")
-                        # Reset retry counter on success
-                        chat_with_mcp_agent_stream._empty_retries = 0
+                        # Local counters reset automatically on success
                         break
                     
                     # Still no response - yield error to frontend
@@ -1004,8 +1025,7 @@ async def chat_with_mcp_agent_stream(request: ChatRequest):
                 
                 continue
         
-        # Reset retry counter at end of successful stream
-        chat_with_mcp_agent_stream._empty_retries = 0
+        # Stream completed (local retry counters automatically go out of scope)
 
     except Exception as e:
         logger.exception("Chat stream failed")

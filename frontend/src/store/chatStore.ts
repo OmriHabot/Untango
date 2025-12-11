@@ -194,15 +194,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     const last = msgs[msgs.length - 1];
                     const newParts = [...(last.parts || [])];
                     
-                    // If last part is text, append to it
+                    // Find the LAST text part to append to (maintains interleaved order)
+                    let lastTextPartIndex = -1;
+                    for (let i = newParts.length - 1; i >= 0; i--) {
+                      if (newParts[i].type === 'text') {
+                        lastTextPartIndex = i;
+                        break;
+                      }
+                    }
+                    
+                    // If the very last part is text, append to it
                     if (newParts.length > 0 && newParts[newParts.length - 1].type === 'text') {
+                      // Use fullContent as the source of truth for this text segment
+                      // Count text before this segment by looking at previous text parts
+                      let textBeforeLastPart = '';
+                      for (let i = 0; i < newParts.length - 1; i++) {
+                        if (newParts[i].type === 'text') {
+                          textBeforeLastPart += newParts[i].content || '';
+                        }
+                      }
+                      // This text part should contain everything after previous text parts
+                      const thisSegmentContent = fullContent.slice(textBeforeLastPart.length);
                       newParts[newParts.length - 1] = {
                         ...newParts[newParts.length - 1],
-                        content: (newParts[newParts.length - 1].content || '') + event.content
+                        content: thisSegmentContent
                       };
                     } else {
-                      // Otherwise start new text part
-                      newParts.push({ type: 'text', content: event.content });
+                      // Last part is a tool (or no parts yet) - start a new text part
+                      // Calculate what text belongs to this new segment
+                      let textInPreviousParts = '';
+                      for (const p of newParts) {
+                        if (p.type === 'text') {
+                          textInPreviousParts += p.content || '';
+                        }
+                      }
+                      const newSegmentContent = fullContent.slice(textInPreviousParts.length);
+                      if (newSegmentContent) {
+                        newParts.push({ type: 'text', content: newSegmentContent });
+                      }
                     }
                     
                     msgs[msgs.length - 1] = { ...last, content: fullContent, parts: newParts };
