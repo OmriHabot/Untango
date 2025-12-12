@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from typing import List, Dict, Any
-from .models import Message
+from ..core.models import Message
 
 logger = logging.getLogger(__name__)
 

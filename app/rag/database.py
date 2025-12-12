@@ -8,7 +8,7 @@ import chromadb
 from chromadb.api.models.Collection import Collection
 from chromadb.api import ClientAPI
 from chromadb.config import Settings
-from app.embeddings import SentenceTransformerEmbeddingFunction
+from .embeddings import SentenceTransformerEmbeddingFunction
 import google.auth
 import google.auth.transport.requests
 from google.oauth2 import id_token

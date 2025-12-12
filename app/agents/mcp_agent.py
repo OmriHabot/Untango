@@ -18,10 +18,10 @@ from fastapi import HTTPException
 from google import genai
 from google.genai import types
 
-from ..models import ChatRequest, ChatResponse, TokenUsage, ToolCall
-from ..active_repo_state import active_repo_state
-from ..repo_manager import repo_manager
-from ..context_manager import context_manager
+from ..core.models import ChatRequest, ChatResponse, TokenUsage, ToolCall
+from ..repos.state import active_repo_state
+from ..repos.manager import repo_manager
+from ..repos.context import context_manager
 
 # MCP Client imports
 try:
@@ -451,7 +451,7 @@ def get_rag_context_for_query(query: str, repo_id: Optional[str] = None) -> str:
         Formatted string with RAG results, or empty string if none found
     """
     try:
-        from ..search import perform_hybrid_search
+        from ..rag.search import perform_hybrid_search
         results = perform_hybrid_search(query, n_results=20, repo_id=repo_id)
         
         if not results:

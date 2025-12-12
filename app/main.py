@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 
-from .models import (
+from .core.models import (
     CodeIngestRequest,
     QueryRequest,
     InferenceRequest,
@@ -35,26 +35,26 @@ from .models import (
     MessagePart,
     Message
 )
-from .database import (
+from .rag.database import (
     get_collection,
     get_client,
     get_collection_name,
     reset_collection
 )
-from .chunker import chunk_python_code
-from .ingest_manager import ingest_manager, IngestManager
-from .repo_manager import repo_manager, RepositoryContext
-from .active_repo_state import active_repo_state
-from .search import perform_hybrid_search, perform_vector_search, tokenize_code
+from .rag.chunker import chunk_python_code
+from .rag.ingest import ingest_manager, IngestManager
+from .repos.manager import repo_manager, RepositoryContext
+from .repos.state import active_repo_state
+from .rag.search import perform_hybrid_search, perform_vector_search, tokenize_code
 from rank_bm25 import BM25Okapi
-from .logger import setup_logging, get_logger
+from .core.logger import setup_logging, get_logger
 from .agents.mcp_agent import chat_with_mcp_agent, chat_with_mcp_agent_stream
-from .chat_history import chat_history_manager
-from .context_manager import context_manager
+from .chat.history import chat_history_manager
+from .repos.context import context_manager
 
 # Import MCP server
 try:
-    from .mcp_server import mcp as mcp_server
+    from .mcp.server import mcp as mcp_server
     MCP_AVAILABLE = True
 except ImportError as e:
     MCP_AVAILABLE = False

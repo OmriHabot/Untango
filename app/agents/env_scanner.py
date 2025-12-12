@@ -8,7 +8,7 @@ import subprocess
 import logging
 from typing import List
 
-from ..models import EnvInfo
+from ..core.models import EnvInfo
 
 logger = logging.getLogger(__name__)
 

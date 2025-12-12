@@ -5,11 +5,11 @@ Synthesizes environment info, repo structure, and RAG insights to generate a Mar
 import logging
 from typing import Optional
 
-from ..models import EnvInfo, RepoMap, RAGQueryRequest
+from ..core.models import EnvInfo, RepoMap, RAGQueryRequest
 # We will import query_db dynamically or pass it to avoid circular imports if possible, 
 # but since query_db is a route handler, we might want to extract the logic to a service function.
 # For now, we will assume we can call the search logic directly or via internal API.
-from ..search import perform_hybrid_search
+from ..rag.search import perform_hybrid_search
 from google import genai
 import os
 from datetime import datetime
@@ -17,7 +17,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 from typing import List
-from ..context_manager import DependencyStatus
+from ..repos.context import DependencyStatus
 
 async def generate_runbook_content(
     repo_map: RepoMap, 

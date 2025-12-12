@@ -5,7 +5,7 @@ import ast
 from typing import List, Dict, Any
 from fastapi import HTTPException
 
-from .models import ChunkMetadata
+from ..core.models import ChunkMetadata
 
 
 def chunk_python_code(code: str, filepath: str, repo_name: str) -> List[Dict[str, Any]]:

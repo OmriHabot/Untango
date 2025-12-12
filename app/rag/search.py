@@ -7,7 +7,7 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 
 from .database import get_collection
-from .logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

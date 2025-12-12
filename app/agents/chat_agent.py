@@ -15,15 +15,15 @@ from fastapi import HTTPException
 from google import genai
 from google.genai import types
 
-from ..models import ChatRequest, ChatResponse, TokenUsage, ToolCall
+from ..core.models import ChatRequest, ChatResponse, TokenUsage, ToolCall
 from ..tools.filesystem import read_file, list_files
 from ..tools.shell_execution import execute_command as shell_execute, ensure_venv
 from ..tools.test_runner import discover_tests as test_discover, run_tests as test_run
 from ..tools.git_tools import get_git_status, get_git_diff, get_git_log
 from ..tools.code_quality import run_linter as quality_lint
 from ..tools.ast_tools import find_function_usages as ast_find_usages
-from ..search import perform_hybrid_search
-from ..active_repo_state import active_repo_state
+from ..rag.search import perform_hybrid_search
+from ..repos.state import active_repo_state
 
 # MCP Client imports
 try:
@@ -47,7 +47,7 @@ def calculate_cost(input_tokens: int, output_tokens: int) -> tuple[float, float,
     total_cost = input_cost + output_cost
     return input_cost, output_cost, total_cost
 
-from ..repo_manager import repo_manager
+from ..repos.manager import repo_manager
 
 # --- Tool Wrappers for Vertex AI ---
 
@@ -380,7 +380,7 @@ async def get_cached_mcp_tools() -> types.Tool:
 
 
 
-from ..context_manager import context_manager
+from ..repos.context import context_manager
 from datetime import datetime
 
 def get_readme_content() -> str:

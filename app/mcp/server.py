@@ -9,15 +9,15 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
 # Import existing tool implementations
-from .tools.filesystem import read_file as read_file_impl, list_files as list_files_impl
-from .tools.shell_execution import execute_command as shell_execute, ensure_venv
-from .tools.test_runner import discover_tests as test_discover, run_tests as test_run
-from .tools.git_tools import get_git_status, get_git_diff, get_git_log
-from .tools.code_quality import run_linter as quality_lint
-from .tools.ast_tools import find_function_usages as ast_find_usages
-from .search import perform_hybrid_search
-from .active_repo_state import active_repo_state
-from .repo_manager import repo_manager
+from ..tools.filesystem import read_file as read_file_impl, list_files as list_files_impl
+from ..tools.shell_execution import execute_command as shell_execute, ensure_venv
+from ..tools.test_runner import discover_tests as test_discover, run_tests as test_run
+from ..tools.git_tools import get_git_status, get_git_diff, get_git_log
+from ..tools.code_quality import run_linter as quality_lint
+from ..tools.ast_tools import find_function_usages as ast_find_usages
+from ..rag.search import perform_hybrid_search
+from ..repos.state import active_repo_state
+from ..repos.manager import repo_manager
 
 logger = logging.getLogger(__name__)
 
@@ -364,7 +364,7 @@ def get_active_repo_path() -> str:
 @mcp.resource("repo://info")
 def get_repo_info() -> str:
     """Get information about the currently active repository."""
-    from .context_manager import context_manager
+    from ..repos.context import context_manager
     
     report = context_manager.get_context_report()
     if report:
@@ -382,7 +382,7 @@ def get_repo_structure() -> str:
 @mcp.resource("repo://dependencies")
 def get_repo_dependencies() -> str:
     """Get the dependencies of the active repository."""
-    from .context_manager import context_manager
+    from ..repos.context import context_manager
     
     report = context_manager.get_context_report()
     if report and report.dependency_analysis:

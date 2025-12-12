@@ -1,0 +1,67 @@
+"""
+Core infrastructure module.
+Contains logging, configuration, and shared models.
+"""
+from .logger import setup_logging, get_logger, log_with_extra
+from .models import (
+    CodeIngestRequest,
+    QueryRequest,
+    InferenceRequest,
+    ChunkMetadata,
+    SearchResult,
+    TokenUsage,
+    InferenceResponse,
+    HealthResponse,
+    RAGQueryRequest,
+    RetrievedChunk,
+    RAGQueryResponse,
+    EnvInfo,
+    RepoMap,
+    RunbookRequest,
+    RunbookResponse,
+    ToolCall,
+    MessagePart,
+    Message,
+    ChatRequest,
+    ChatResponse,
+    RepositorySource,
+    IngestRepositoryRequest,
+    RepositoryInfo,
+    SetActiveRepositoryRequest,
+    RepositorySummary,
+    ListRepositoriesResponse,
+)
+
+__all__ = [
+    # Logger
+    "setup_logging",
+    "get_logger",
+    "log_with_extra",
+    # Models
+    "CodeIngestRequest",
+    "QueryRequest",
+    "InferenceRequest",
+    "ChunkMetadata",
+    "SearchResult",
+    "TokenUsage",
+    "InferenceResponse",
+    "HealthResponse",
+    "RAGQueryRequest",
+    "RetrievedChunk",
+    "RAGQueryResponse",
+    "EnvInfo",
+    "RepoMap",
+    "RunbookRequest",
+    "RunbookResponse",
+    "ToolCall",
+    "MessagePart",
+    "Message",
+    "ChatRequest",
+    "ChatResponse",
+    "RepositorySource",
+    "IngestRepositoryRequest",
+    "RepositoryInfo",
+    "SetActiveRepositoryRequest",
+    "RepositorySummary",
+    "ListRepositoriesResponse",
+]

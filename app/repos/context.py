@@ -7,9 +7,9 @@ import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-from .agents.env_scanner import scan_environment
-from .agents.repo_mapper import map_repo
-from .models import EnvInfo, RepoMap
+from ..agents.env_scanner import scan_environment
+from ..agents.repo_mapper import map_repo
+from ..core.models import EnvInfo, RepoMap
 
 logger = logging.getLogger(__name__)
 
@@ -181,8 +181,8 @@ class ContextManager:
         Get the current context report.
         Automatically re-initializes if the active repo has changed or if no report exists.
         """
-        from .active_repo_state import active_repo_state
-        from .repo_manager import repo_manager
+        from .state import active_repo_state
+        from .manager import repo_manager
 
         active_repo_id = active_repo_state.get_active_repo_id()
         

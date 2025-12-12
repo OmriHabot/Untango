@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 
-from ..models import RepoMap
+from ..core.models import RepoMap
 
 logger = logging.getLogger(__name__)
 
