@@ -13,8 +13,65 @@ interface Props {
 
 const ToolCallDisplay: React.FC<{ toolCall: ToolCall }> = ({ toolCall }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const isCompleted = toolCall.status === 'completed';
   const isFailed = toolCall.status === 'failed';
+  const isExecuteCommand = toolCall.tool === 'execute_command';
+
+  // Extract command from args for execute_command
+  const command = isExecuteCommand ? toolCall.args?.command : null;
+
+  const handleCopyCommand = async () => {
+    if (command) {
+      try {
+        await navigator.clipboard.writeText(command);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (err) {
+        console.error('Failed to copy command:', err);
+      }
+    }
+  };
+
+  // Special display for execute_command - show as suggested command
+  if (isExecuteCommand && isCompleted) {
+    return (
+      <div className="mb-2 rounded-md border border-amber-600/50 bg-amber-950/30 overflow-hidden text-sm">
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-900/30 border-b border-amber-600/30">
+          <Terminal className="w-4 h-4 text-amber-400" />
+          <span className="font-medium text-amber-200 flex-1">Suggested Command</span>
+          <span className="text-xs text-amber-400/70">Run this in your terminal</span>
+        </div>
+        <div className="p-3">
+          <div className="flex items-center gap-2 bg-slate-900 rounded-md border border-slate-700 p-2">
+            <code className="flex-1 font-mono text-sm text-slate-200 overflow-x-auto">
+              {command}
+            </code>
+            <button
+              onClick={handleCopyCommand}
+              className="shrink-0 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors flex items-center gap-1"
+              title="Copy command"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-3 h-3 text-green-400" />
+                  <span>Copied!</span>
+                </>
+              ) : (
+                <>
+                  <span>📋</span>
+                  <span>Copy</span>
+                </>
+              )}
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-amber-400/70 italic">
+            This command was not executed automatically. Copy and run it in your terminal.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mb-2 rounded-md border border-slate-700 bg-slate-900 overflow-hidden text-sm">
@@ -55,10 +112,64 @@ const ToolCallDisplay: React.FC<{ toolCall: ToolCall }> = ({ toolCall }) => {
 };
 
 const markdownComponents = {
+  // Headers with explicit sizing since @tailwindcss/typography isn't installed
+  h1: ({ children, ...props }: any) => (
+    <h1 className="text-2xl font-bold text-white mt-6 mb-4 first:mt-0" {...props}>{children}</h1>
+  ),
+  h2: ({ children, ...props }: any) => (
+    <h2 className="text-xl font-semibold text-white mt-5 mb-3 first:mt-0" {...props}>{children}</h2>
+  ),
+  h3: ({ children, ...props }: any) => (
+    <h3 className="text-lg font-semibold text-slate-100 mt-4 mb-2 first:mt-0" {...props}>{children}</h3>
+  ),
+  h4: ({ children, ...props }: any) => (
+    <h4 className="text-base font-semibold text-slate-200 mt-3 mb-2 first:mt-0" {...props}>{children}</h4>
+  ),
+  h5: ({ children, ...props }: any) => (
+    <h5 className="text-sm font-semibold text-slate-200 mt-2 mb-1 first:mt-0" {...props}>{children}</h5>
+  ),
+  h6: ({ children, ...props }: any) => (
+    <h6 className="text-sm font-medium text-slate-300 mt-2 mb-1 first:mt-0" {...props}>{children}</h6>
+  ),
+  // Paragraphs
+  p: ({ children, ...props }: any) => (
+    <p className="text-slate-300 mb-3 last:mb-0 leading-relaxed" {...props}>{children}</p>
+  ),
+  // Lists
+  ul: ({ children, ...props }: any) => (
+    <ul className="list-disc list-inside mb-3 space-y-1 text-slate-300" {...props}>{children}</ul>
+  ),
+  ol: ({ children, ...props }: any) => (
+    <ol className="list-decimal list-inside mb-3 space-y-1 text-slate-300" {...props}>{children}</ol>
+  ),
+  li: ({ children, ...props }: any) => (
+    <li className="text-slate-300" {...props}>{children}</li>
+  ),
+  // Links
+  a: ({ children, href, ...props }: any) => (
+    <a href={href} className="text-purple-400 hover:text-purple-300 underline" target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+  ),
+  // Blockquotes
+  blockquote: ({ children, ...props }: any) => (
+    <blockquote className="border-l-4 border-purple-500 pl-4 my-3 italic text-slate-400" {...props}>{children}</blockquote>
+  ),
+  // Horizontal rule
+  hr: (props: any) => (
+    <hr className="border-slate-700 my-4" {...props} />
+  ),
+  // Strong/Bold
+  strong: ({ children, ...props }: any) => (
+    <strong className="font-semibold text-white" {...props}>{children}</strong>
+  ),
+  // Emphasis/Italic
+  em: ({ children, ...props }: any) => (
+    <em className="italic text-slate-200" {...props}>{children}</em>
+  ),
+  // Code blocks
   code({ node, inline, className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
     return !inline && match ? (
-      <div className="rounded-md overflow-hidden my-2 border border-slate-700">
+      <div className="rounded-md overflow-hidden my-3 border border-slate-700">
         <div className="bg-slate-900 px-4 py-1 text-xs text-slate-400 border-b border-slate-700 flex justify-between items-center">
           <span>{match[1]}</span>
         </div>
@@ -73,11 +184,26 @@ const markdownComponents = {
         </SyntaxHighlighter>
       </div>
     ) : (
-      <code className="bg-slate-800 px-1 py-0.5 rounded text-purple-300 font-mono text-sm" {...props}>
+      <code className="bg-slate-800 px-1.5 py-0.5 rounded text-purple-300 font-mono text-sm" {...props}>
         {children}
       </code>
     );
-  }
+  },
+  // Tables
+  table: ({ children, ...props }: any) => (
+    <div className="overflow-x-auto my-3">
+      <table className="min-w-full border border-slate-700 text-sm" {...props}>{children}</table>
+    </div>
+  ),
+  thead: ({ children, ...props }: any) => (
+    <thead className="bg-slate-800" {...props}>{children}</thead>
+  ),
+  th: ({ children, ...props }: any) => (
+    <th className="border border-slate-700 px-3 py-2 text-left font-semibold text-slate-200" {...props}>{children}</th>
+  ),
+  td: ({ children, ...props }: any) => (
+    <td className="border border-slate-700 px-3 py-2 text-slate-300" {...props}>{children}</td>
+  ),
 };
 
 const MarkdownContent: React.FC<{ content: string }> = React.memo(({ content }) => (

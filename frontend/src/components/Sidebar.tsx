@@ -1,12 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { useRepoStore } from '../store/repoStore';
 import { useChatStore } from '../store/chatStore';
-import { Plus, Database, Loader2, CheckCircle, XCircle, GitBranch, Presentation, BookOpen, Terminal, Layout, Table as TableIcon } from 'lucide-react';
+import { Plus, Database, Loader2, CheckCircle, XCircle, GitBranch, Presentation, BookOpen, Terminal, Layout, Table as TableIcon, Eye, EyeOff, FolderOpen } from 'lucide-react';
 import clsx from 'clsx';
 import { IngestModal } from './IngestModal';
+import { pickDirectory, scanDirectoryWithSummary, computeFileHashes } from '../utils/localDirectoryUtils';
+
+// Helper to check if a repo is local
+const isLocalRepo = (repo: { source_type?: string; source_location?: string; path?: string }): boolean => {
+  // Explicit source_type
+  if (repo.source_type === 'local') return true;
+  
+  // source_location patterns for local repos
+  if (repo.source_location?.startsWith('local://')) return true;
+  
+  // If no source_type is set but path doesn't look like a GitHub clone, assume it could be local
+  // (GitHub clones usually have a .git folder and we'd have source_type = "github")
+  if (!repo.source_type && !repo.source_location?.includes('github.com')) {
+    // Log for debugging
+    console.debug('[Sidebar] Repo without explicit type:', repo);
+  }
+  
+  return false;
+};
 
 export const Sidebar: React.FC = () => {
-  const { repositories, activeRepoId, fetchRepositories, setActiveRepo, checkActiveRepo, ingestionStatuses, viewMode, setViewMode, activeShowcaseTab, setActiveShowcaseTab } = useRepoStore();
+  const { repositories, activeRepoId, fetchRepositories, setActiveRepo, checkActiveRepo, ingestionStatuses, viewMode, setViewMode, activeShowcaseTab, setActiveShowcaseTab, watchStates, startWatch, stopWatch } = useRepoStore();
   const { messages, sendMessage, isLoading: isChatLoading, loadHistory } = useChatStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -26,6 +45,30 @@ export const Sidebar: React.FC = () => {
       loadHistory();
     }
   }, [activeRepoId]);
+
+  // Handle watch toggle - requires picking directory again if not watching
+  const handleWatchToggle = async (e: React.MouseEvent, repoId: string) => {
+    e.stopPropagation(); // Don't select the repo
+    
+    const watchState = watchStates[repoId];
+    
+    if (watchState?.isWatching) {
+      // Stop watching
+      stopWatch(repoId);
+    } else {
+      // Need to pick directory to start watching
+      try {
+        const handle = await pickDirectory();
+        if (handle) {
+          const result = await scanDirectoryWithSummary(handle);
+          const hashes = await computeFileHashes(result.files);
+          startWatch(repoId, handle, hashes);
+        }
+      } catch (err) {
+        console.error('Failed to start watch:', err);
+      }
+    }
+  };
 
   return (
     <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col h-screen text-slate-300">
@@ -106,6 +149,9 @@ export const Sidebar: React.FC = () => {
             {repositories.map((repo) => {
               const status = ingestionStatuses[repo.repo_id];
               const isActive = activeRepoId === repo.repo_id;
+              const isLocal = isLocalRepo(repo);
+              const watchState = watchStates[repo.repo_id];
+              const isWatching = watchState?.isWatching ?? false;
               
               return (
                 <button
@@ -121,13 +167,42 @@ export const Sidebar: React.FC = () => {
                       : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
                   )}
                 >
-                  <GitBranch className="w-4 h-4 shrink-0" />
+                  {/* Icon: folder for local, git branch for remote */}
+                  {isLocal ? (
+                    <FolderOpen className="w-4 h-4 shrink-0 text-amber-400" />
+                  ) : (
+                    <GitBranch className="w-4 h-4 shrink-0" />
+                  )}
+                  
                   <div className="flex-1 truncate">
                     {repo.name} <span className="text-slate-500 text-xs">({repo.repo_id.substring(0, 6)})</span>
                   </div>
                   
+                  {/* Watch indicator for local repos */}
+                  {isLocal && (
+                    <button
+                      onClick={(e) => handleWatchToggle(e, repo.repo_id)}
+                      className={clsx(
+                        "p-1 rounded transition-colors",
+                        isWatching 
+                          ? "text-green-400 hover:text-green-300 hover:bg-green-400/10" 
+                          : "text-slate-500 hover:text-slate-300 hover:bg-slate-700"
+                      )}
+                      title={isWatching 
+                        ? `Watching • ${watchState?.syncCount || 0} syncs${watchState?.lastSyncTime ? ` • Last: ${watchState.lastSyncTime.toLocaleTimeString()}` : ''}` 
+                        : "Click to start watching for changes"
+                      }
+                    >
+                      {isWatching ? (
+                        <Eye className="w-3.5 h-3.5" />
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  )}
+                  
                   {status === 'ingesting' && <Loader2 className="w-3 h-3 animate-spin text-blue-400" />}
-                  {status === 'completed' && isActive && <CheckCircle className="w-3 h-3 text-green-500" />}
+                  {status === 'completed' && isActive && !isLocal && <CheckCircle className="w-3 h-3 text-green-500" />}
                   {status === 'failed' && <XCircle className="w-3 h-3 text-red-500" />}
                 </button>
               );

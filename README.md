@@ -169,7 +169,7 @@ curl -X POST "http://localhost:8001/query-db" \
     "query": "How does authentication work in this codebase?",
     "n_results": 10,
     "confidence_threshold": 0.2,
-    "model": "gemini-2.5-flash"
+    "model": "gemini-3-pro-preview"
   }'
 ```
 
@@ -188,7 +188,7 @@ curl -X POST "http://localhost:8001/inference" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Explain vector databases",
-    "model": "gemini-2.5-flash"
+    "model": "gemini-3-pro-preview"
   }'
 ```
 

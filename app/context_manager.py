@@ -31,9 +31,9 @@ class ContextReport:
         lines = []
         keys = sorted(structure.keys())
         # Limit items per level to avoid context overflow
-        if len(keys) > 50:
-            keys = keys[:50]
-            keys.append("... (truncated)")
+        # if len(keys) > 50:
+        #     keys = keys[:50]
+        #     keys.append("... (truncated)")
             
         for key in keys:
             if key == "... (truncated)":
@@ -64,6 +64,10 @@ class ContextReport:
         # Repo Section
         report.append("\n[Repository]")
         report.append(f"Name: {self.repo_map.repo_name}")
+        if self.repo_map.detected_name and self.repo_map.detected_name != self.repo_map.repo_name:
+            report.append(f"Detected Name: {self.repo_map.detected_name}")
+        report.append(f"Type: {self.repo_map.repo_type}")
+        report.append(f"README Exists: {self.repo_map.readme_exists}")
         report.append(f"Last Updated: {self.repo_map.last_updated}")
         report.append(f"Entry Points: {', '.join(self.repo_map.entry_points[:5])}" + 
                      (f" (+{len(self.repo_map.entry_points)-5} more)" if len(self.repo_map.entry_points) > 5 else ""))

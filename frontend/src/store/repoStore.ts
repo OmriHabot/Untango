@@ -1,16 +1,36 @@
 import { create } from 'zustand';
 import { api, Repository } from '../api/client';
 
+// Watch state for a single repository
+export interface WatchState {
+  isWatching: boolean;
+  lastSyncTime: Date | null;
+  syncCount: number;
+}
+
+// Module-level storage (not in zustand state - can't serialize FileSystemDirectoryHandle)
+const directoryHandles: Map<string, FileSystemDirectoryHandle> = new Map();
+const watchIntervals: Map<string, number> = new Map();
+const fileHashes: Map<string, Record<string, string>> = new Map();
+const repoIdToName: Map<string, string> = new Map();
+
 interface RepoState {
   repositories: Repository[];
   activeRepoId: string | null;
   isLoading: boolean;
   ingestionStatuses: Record<string, string>;
+  watchStates: Record<string, WatchState>;
   
   fetchRepositories: () => Promise<void>;
   setActiveRepo: (repoId: string) => Promise<void>;
   checkActiveRepo: () => Promise<void>;
   pollStatus: (repoId: string) => Promise<void>;
+  
+  // Watch management
+  startWatch: (repoId: string, directoryHandle: FileSystemDirectoryHandle, initialHashes: Record<string, string>) => void;
+  stopWatch: (repoId: string) => void;
+  updateWatchState: (repoId: string, updates: Partial<WatchState>) => void;
+  getDirectoryHandle: (repoId: string) => FileSystemDirectoryHandle | null;
   
   viewMode: 'chat' | 'showcase';
   setViewMode: (mode: 'chat' | 'showcase') => void;
@@ -24,6 +44,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   activeRepoId: null,
   isLoading: false,
   ingestionStatuses: {},
+  watchStates: {},
   viewMode: 'chat',
   activeShowcaseTab: 'docs',
 
@@ -35,6 +56,10 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     try {
       const data = await api.listRepositories();
       set({ repositories: data.repositories });
+      // Update repoIdToName map
+      data.repositories.forEach(repo => {
+        repoIdToName.set(repo.repo_id, repo.name);
+      });
     } catch (error) {
       console.error('Failed to fetch repositories:', error);
     } finally {
@@ -85,5 +110,115 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       }
     };
     check();
+  },
+
+  // Watch management functions
+  startWatch: (repoId, directoryHandle, initialHashes) => {
+    // Store the handle and hashes
+    directoryHandles.set(repoId, directoryHandle);
+    fileHashes.set(repoId, initialHashes);
+    
+    // Initialize watch state
+    set((state) => ({
+      watchStates: {
+        ...state.watchStates,
+        [repoId]: {
+          isWatching: true,
+          lastSyncTime: null,
+          syncCount: 0
+        }
+      }
+    }));
+    
+    // Import utilities dynamically to avoid circular dependencies
+    import('../utils/localDirectoryUtils').then(async ({ scanDirectoryWithSummary, computeFileHashes, findChangedFiles, createZipBundle }) => {
+      // Start polling interval
+      const intervalId = window.setInterval(async () => {
+        const handle = directoryHandles.get(repoId);
+        const currentHashes = fileHashes.get(repoId);
+        
+        if (!handle || !currentHashes) {
+          get().stopWatch(repoId);
+          return;
+        }
+        
+        try {
+          // Re-scan directory
+          const result = await scanDirectoryWithSummary(handle);
+          const newHashes = await computeFileHashes(result.files);
+          
+          // Find changed files
+          const changedPaths = findChangedFiles(currentHashes, newHashes);
+          
+          if (changedPaths.length > 0) {
+            // Get the changed files
+            const changedFiles = result.files.filter(f => changedPaths.includes(f.path));
+            
+            // Create bundle of changed files
+            const bundle = await createZipBundle(changedFiles);
+            
+            // Sync to server
+            await api.syncRepository(bundle, repoId);
+            
+            // Update state
+            fileHashes.set(repoId, newHashes);
+            set((state) => ({
+              watchStates: {
+                ...state.watchStates,
+                [repoId]: {
+                  ...state.watchStates[repoId],
+                  lastSyncTime: new Date(),
+                  syncCount: (state.watchStates[repoId]?.syncCount || 0) + 1
+                }
+              }
+            }));
+          }
+        } catch (err) {
+          console.error('Watch sync error:', err);
+        }
+      }, 3000);
+      
+      watchIntervals.set(repoId, intervalId);
+    });
+  },
+
+  stopWatch: (repoId) => {
+    // Clear interval
+    const intervalId = watchIntervals.get(repoId);
+    if (intervalId) {
+      clearInterval(intervalId);
+      watchIntervals.delete(repoId);
+    }
+    
+    // Clear stored data
+    directoryHandles.delete(repoId);
+    fileHashes.delete(repoId);
+    
+    // Update state
+    set((state) => ({
+      watchStates: {
+        ...state.watchStates,
+        [repoId]: {
+          ...state.watchStates[repoId],
+          isWatching: false
+        }
+      }
+    }));
+  },
+
+  updateWatchState: (repoId, updates) => {
+    set((state) => ({
+      watchStates: {
+        ...state.watchStates,
+        [repoId]: {
+          ...state.watchStates[repoId],
+          ...updates
+        }
+      }
+    }));
+  },
+
+  getDirectoryHandle: (repoId) => {
+    return directoryHandles.get(repoId) || null;
   }
 }));

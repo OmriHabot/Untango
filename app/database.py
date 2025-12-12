@@ -29,9 +29,10 @@ def get_embedding_function() -> SentenceTransformerEmbeddingFunction:
     global _embedding_func
     if _embedding_func is None:
         # Use a larger batch size for better throughput on GPU/MPS
+        # 128 provides good GPU utilization for large ingestion batches
         _embedding_func = SentenceTransformerEmbeddingFunction(
             model_name="all-MiniLM-L6-v2",
-            batch_size=64
+            batch_size=128
         )
     return _embedding_func
 

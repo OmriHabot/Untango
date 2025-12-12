@@ -1,29 +1,27 @@
 """
-Chat Agent
-Handles user queries using Vertex AI with function calling (tools).
-Tools:
-- RAG (query_db)
-- Filesystem (list_files, read_file)
-- Dependencies (list_package_files)
+MCP-Native Chat Agent
+Handles user queries using Vertex AI with function calling via MCP server.
+
+This module provides the chat agent functionality using:
+- MCP (Model Context Protocol) for tool schemas and execution
+- Vertex AI for LLM inference
+- Full streaming support for real-time responses
 """
 import logging
 import os
 import json
-from typing import List, Dict, Any
+import time
+from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 from fastapi import HTTPException
 from google import genai
 from google.genai import types
 
 from ..models import ChatRequest, ChatResponse, TokenUsage, ToolCall
-from ..tools.filesystem import read_file, list_files
-from ..tools.shell_execution import execute_command as shell_execute, ensure_venv
-from ..tools.test_runner import discover_tests as test_discover, run_tests as test_run
-from ..tools.git_tools import get_git_status, get_git_diff, get_git_log
-from ..tools.code_quality import run_linter as quality_lint
-from ..tools.ast_tools import find_function_usages as ast_find_usages
-from ..search import perform_hybrid_search
 from ..active_repo_state import active_repo_state
+from ..repo_manager import repo_manager
+from ..context_manager import context_manager
 
 # MCP Client imports
 try:
@@ -35,9 +33,22 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# ============= Configuration =============
+
+# MCP server URL
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8001/mcp")
+
 # Pricing for gemini-3-pro-preview (per million tokens)
 INPUT_PRICE_PER_MILLION = 0.30  # $0.30 per million tokens
 OUTPUT_PRICE_PER_MILLION = 2.50  # $2.50 per million tokens
+
+# MCP tools cache
+_cached_mcp_tools: Optional[types.Tool] = None
+_mcp_tools_cache_time: float = 0
+MCP_TOOLS_CACHE_TTL = 60  # Cache tools for 60 seconds
+
+
+# ============= Helper Functions =============
 
 def calculate_cost(input_tokens: int, output_tokens: int) -> tuple[float, float, float]:
     """Calculate cost based on token usage.
@@ -47,9 +58,6 @@ def calculate_cost(input_tokens: int, output_tokens: int) -> tuple[float, float,
     total_cost = input_cost + output_cost
     return input_cost, output_cost, total_cost
 
-from ..repo_manager import repo_manager
-
-# --- Tool Wrappers for Vertex AI ---
 
 def get_active_repo_path() -> str:
     """Helper to get the path of the active repository."""
@@ -59,244 +67,100 @@ def get_active_repo_path() -> str:
     return "."
 
 
-
-def read_file_wrapper(filepath: str, max_lines: int = 500) -> str:
-    """
-    Read the content of a file.
-    Args:
-        filepath: Path to the file.
-        max_lines: Maximum number of lines to read.
-    """
+def get_readme_content() -> str:
+    """Read README.md from the active repository root if it exists."""
     try:
-        base_path = get_active_repo_path()
-        full_path = os.path.join(base_path, filepath)
-        return read_file(full_path, max_lines)
+        repo_path = get_active_repo_path()
+        readme_path = os.path.join(repo_path, "README.md")
+        if os.path.exists(readme_path):
+            with open(readme_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # Limit to first 1500 chars to encourage tool exploration
+                # if len(content) > 1500:
+                #     content = content[:1500] + "\n\n... (README truncated - use read_file('README.md') for full content)"
+                return content
     except Exception as e:
-        return f"Error reading file: {e}"
+        logger.warning(f"Failed to read README.md: {e}")
+    return ""
 
-def rag_search(query: str) -> str:
+
+def get_repo_file_tree(max_entries: int = 100) -> str:
     """
-    Search the codebase using the RAG system (Vector + Keyword search).
-    Use this to find relevant code snippets or answer questions about the codebase logic.
+    Get a breadth-first listing of files and directories in the repository.
+    Returns a formatted string with level, type (file/dir), and name.
+    Files are prioritized over directories at each level.
     """
     try:
-        # Get active repository ID for filtering
-        repo_id = active_repo_state.get_active_repo_id()
-        results = perform_hybrid_search(query, n_results=5, repo_id=repo_id)
-        if not results:
-            return "No relevant code found."
+        repo_path = get_active_repo_path()
+        if not os.path.isdir(repo_path):
+            return ""
         
-        # Format results for the LLM
-        context = []
-        for r in results:
-            meta = r['metadata']
-            context.append(f"File: {meta.get('filepath')}\nLines: {meta.get('start_line')}-{meta.get('end_line')}\nContent:\n{r['content']}\n")
+        # BFS with (path, level) tuples
+        from collections import deque
+        
+        entries = []  # List of (level, is_file, name, relative_path)
+        queue = deque([(repo_path, 0)])  # (path, level)
+        
+        # Directories to skip
+        skip_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', 
+                     '.env', 'dist', 'build', '.next', '.cache', '.pytest_cache',
+                     'egg-info', '.eggs', '.tox', '.mypy_cache', '.ruff_cache'}
+        
+        while queue and len(entries) < max_entries * 2:  # Collect more, then sort/filter
+            current_path, level = queue.popleft()
             
-        return "\n---\n".join(context)
+            try:
+                items = os.listdir(current_path)
+            except PermissionError:
+                continue
+            
+            # Separate files and directories
+            files = []
+            dirs = []
+            
+            for item in items:
+                if item.startswith('.') and item not in {'.env.example', '.gitignore'}:
+                    continue  # Skip hidden files except useful ones
+                    
+                full_path = os.path.join(current_path, item)
+                rel_path = os.path.relpath(full_path, repo_path)
+                
+                if os.path.isfile(full_path):
+                    files.append((level, True, item, rel_path))
+                elif os.path.isdir(full_path):
+                    if item not in skip_dirs and not item.endswith('.egg-info'):
+                        dirs.append((level, False, item, rel_path))
+                        queue.append((full_path, level + 1))
+            
+            # Add files first (priority), then dirs
+            entries.extend(sorted(files, key=lambda x: x[2].lower()))
+            entries.extend(sorted(dirs, key=lambda x: x[2].lower()))
+        
+        # Sort by level, then files before dirs, then alphabetically
+        entries.sort(key=lambda x: (x[0], not x[1], x[2].lower()))
+        
+        # Truncate to max_entries
+        truncated = len(entries) > max_entries
+        entries = entries[:max_entries]
+        
+        # Format output - simple format to avoid confusing function calling
+        lines = ["FILE TREE:"]
+        for level, is_file, name, rel_path in entries:
+            indent = "  " * level
+            marker = "f" if is_file else "d"
+            lines.append(f"{indent}{marker}: {name}")
+        
+        if truncated:
+            lines.append(f"(truncated at {max_entries} entries)")
+        
+        return "\n".join(lines)
+        
     except Exception as e:
-        return f"RAG search failed: {e}"
-
-def list_files_wrapper(directory: str = ".") -> str:
-    """
-    List files and subdirectories in a directory.
-    Args:
-        directory: Relative path within the repo (default is root).
-    """
-    try:
-        base_path = get_active_repo_path()
-        full_path = os.path.join(base_path, directory)
-        return list_files(full_path)
-    except Exception as e:
-        return f"Error listing files: {e}"
+        logger.warning(f"Failed to generate file tree: {e}")
+        return ""
 
 
-# --- New Tool Wrappers ---
-
-def execute_command_wrapper(command: str, timeout: int = 60) -> str:
-    """Execute a shell command in the repository's virtual environment."""
-    try:
-        repo_path = get_active_repo_path()
-        result = shell_execute(command, repo_path=repo_path, timeout=timeout, use_venv=True)
-        
-        output = f"Command: {result.get('command_executed', command)}\n"
-        output += f"Exit Code: {result.get('exit_code', -1)}\n"
-        if result.get('venv_used'):
-            output += "(Executed in virtual environment)\n"
-        output += "\n--- STDOUT ---\n" + result.get('stdout', '')
-        if result.get('stderr'):
-            output += "\n--- STDERR ---\n" + result.get('stderr', '')
-        if result.get('timed_out'):
-            output += f"\n[TIMED OUT after {timeout}s]"
-        return output
-    except Exception as e:
-        return f"Error executing command: {e}"
-
-
-def discover_tests_wrapper() -> str:
-    """Discover all pytest tests in the repository."""
-    try:
-        repo_path = get_active_repo_path()
-        result = test_discover(repo_path)
-        
-        output = f"Test Discovery Results:\n"
-        output += f"- Test files: {len(result.get('test_files', []))}\n"
-        output += f"- Test functions: {result.get('test_count', 0)}\n\n"
-        
-        if result.get('test_files'):
-            output += "Test Files:\n"
-            for f in result['test_files'][:20]:  # Limit to 20
-                output += f"  - {f}\n"
-            if len(result['test_files']) > 20:
-                output += f"  ... and {len(result['test_files']) - 20} more\n"
-        
-        return output
-    except Exception as e:
-        return f"Error discovering tests: {e}"
-
-
-def run_tests_wrapper(test_path: str = "", verbose: bool = True) -> str:
-    """Run pytest tests in the repository."""
-    try:
-        repo_path = get_active_repo_path()
-        result = test_run(repo_path, test_path=test_path, verbose=verbose)
-        
-        output = f"Test Results:\n"
-        output += f"- Passed: {result.get('passed', 0)}\n"
-        output += f"- Failed: {result.get('failed', 0)}\n"
-        output += f"- Errors: {result.get('errors', 0)}\n"
-        output += f"- Skipped: {result.get('skipped', 0)}\n"
-        output += f"- Duration: {result.get('duration_seconds', 0):.2f}s\n\n"
-        output += "--- Output ---\n" + result.get('output', '')
-        return output
-    except Exception as e:
-        return f"Error running tests: {e}"
-
-
-def git_status_wrapper() -> str:
-    """Get the git status of the repository."""
-    try:
-        repo_path = get_active_repo_path()
-        result = get_git_status(repo_path)
-        
-        if not result.get('success'):
-            return f"Git status failed: {result.get('output', 'Unknown error')}"
-        
-        output = f"Branch: {result.get('branch', 'unknown')}\n"
-        output += f"Status: {'Clean' if result.get('clean') else 'Modified'}\n"
-        
-        if result.get('modified'):
-            output += f"\nModified files ({len(result['modified'])}):\n"
-            for f in result['modified'][:10]:
-                output += f"  M {f}\n"
-        
-        if result.get('staged'):
-            output += f"\nStaged files ({len(result['staged'])}):\n"
-            for f in result['staged'][:10]:
-                output += f"  + {f}\n"
-        
-        if result.get('untracked'):
-            output += f"\nUntracked files ({len(result['untracked'])}):\n"
-            for f in result['untracked'][:10]:
-                output += f"  ? {f}\n"
-        
-        return output
-    except Exception as e:
-        return f"Error getting git status: {e}"
-
-
-def git_diff_wrapper(filepath: str = "") -> str:
-    """Get git diff for the repository or a specific file."""
-    try:
-        repo_path = get_active_repo_path()
-        result = get_git_diff(repo_path, filepath=filepath)
-        
-        if not result.get('success') and not result.get('diff'):
-            return "No changes to show."
-        
-        output = f"Files changed: {result.get('files_changed', 0)}\n"
-        output += f"Insertions: +{result.get('insertions', 0)}\n"
-        output += f"Deletions: -{result.get('deletions', 0)}\n\n"
-        output += result.get('diff', '')
-        return output
-    except Exception as e:
-        return f"Error getting git diff: {e}"
-
-
-def git_log_wrapper(filepath: str = "", max_commits: int = 10) -> str:
-    """Get git log for the repository or a specific file."""
-    try:
-        repo_path = get_active_repo_path()
-        result = get_git_log(repo_path, filepath=filepath, max_commits=max_commits)
-        
-        if not result.get('success'):
-            return f"Git log failed: {result.get('output', 'Unknown error')}"
-        
-        output = f"Recent commits ({len(result.get('commits', []))}):\n\n"
-        for commit in result.get('commits', []):
-            output += f"{commit.get('short_hash', '')} - {commit.get('message', '')}\n"
-            output += f"  Author: {commit.get('author', '')} | {commit.get('date', '')}\n\n"
-        
-        return output
-    except Exception as e:
-        return f"Error getting git log: {e}"
-
-
-def run_linter_wrapper(filepath: str = "") -> str:
-    """Run linter on the repository or a specific file."""
-    try:
-        repo_path = get_active_repo_path()
-        result = quality_lint(repo_path, filepath=filepath)
-        
-        output = f"Linter: {result.get('linter_used', 'unknown')}\n"
-        output += f"Issues found: {result.get('issue_count', 0)}\n\n"
-        
-        if result.get('issues'):
-            for issue in result['issues'][:20]:  # Limit to 20
-                output += f"{issue.get('file')}:{issue.get('line')}: {issue.get('message')}\n"
-            if len(result['issues']) > 20:
-                output += f"\n... and {len(result['issues']) - 20} more issues\n"
-        
-        return output
-    except Exception as e:
-        return f"Error running linter: {e}"
-
-
-def find_function_usages_wrapper(function_name: str) -> str:
-    """Find all usages of a function in the codebase."""
-    try:
-        repo_path = get_active_repo_path()
-        result = ast_find_usages(repo_path, function_name, include_definitions=True)
-        
-        output = f"Searching for usages of '{function_name}':\n\n"
-        
-        if result.get('definitions'):
-            output += f"Definitions ({len(result['definitions'])}):\n"
-            for defn in result['definitions']:
-                output += f"  {defn.get('file')}:{defn.get('line')}\n"
-            output += "\n"
-        
-        output += f"Usages ({result.get('usage_count', 0)}):\n"
-        for usage in result.get('usages', [])[:30]:  # Limit to 30
-            output += f"  {usage.get('file')}:{usage.get('line')} ({usage.get('type')})\n"
-        
-        if result.get('usage_count', 0) > 30:
-            output += f"\n... and {result['usage_count'] - 30} more usages\n"
-        
-        return output
-    except Exception as e:
-        return f"Error finding function usages: {e}"
-
-
-# Tools are now provided exclusively by the MCP server
-# See mcp_server.py for available tools:
-# - rag_search, read_file, list_files, execute_command
-# - discover_tests, run_tests, git_status, git_diff, git_log
-# - run_linter, find_function_usages, get_active_repo_path
-
-
-
-# Dynamic tool schema loading from MCP server
-# No static tool definitions - tools are fetched from MCP at runtime
+# ============= MCP Client Functions =============
 
 async def get_mcp_tools_as_vertex() -> types.Tool:
     """
@@ -354,22 +218,22 @@ async def get_mcp_tools_as_vertex() -> types.Tool:
                     function_declarations.append(func_decl)
                     logger.debug(f"Loaded MCP tool: {tool.name}")
                 
-                logger.info(f"Loaded {len(function_declarations)} tools from MCP server")
+                tool_names = [fd.name for fd in function_declarations]
+                logger.info(f"Loaded {len(function_declarations)} tools from MCP server: {tool_names}")
+                
+                if len(function_declarations) == 0:
+                    logger.warning("No tools loaded from MCP server - model will not be able to use tools!")
+                
                 return types.Tool(function_declarations=function_declarations)
                 
     except Exception as e:
-        logger.error(f"Failed to fetch MCP tools: {e}")
+        logger.error(f"Failed to fetch MCP tools: {e}", exc_info=True)
         return types.Tool(function_declarations=[])
 
-# Cache for MCP tools to avoid fetching on every request
-_cached_mcp_tools: types.Tool = None
-_mcp_tools_cache_time: float = 0
-MCP_TOOLS_CACHE_TTL = 60  # Cache tools for 60 seconds
 
 async def get_cached_mcp_tools() -> types.Tool:
     """Get MCP tools with caching."""
     global _cached_mcp_tools, _mcp_tools_cache_time
-    import time
     
     now = time.time()
     if _cached_mcp_tools is None or (now - _mcp_tools_cache_time) > MCP_TOOLS_CACHE_TTL:
@@ -379,42 +243,79 @@ async def get_cached_mcp_tools() -> types.Tool:
     return _cached_mcp_tools
 
 
-
-from ..context_manager import context_manager
-from datetime import datetime
-
-def get_readme_content() -> str:
-    """Read README.md from the active repository root if it exists."""
+async def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
+    """
+    Execute a tool via MCP client.
+    Connects to the MCP server and calls the specified tool.
+    """
+    if not MCP_CLIENT_AVAILABLE:
+        raise RuntimeError("MCP client not available")
+    
     try:
-        repo_path = get_active_repo_path()
-        readme_path = os.path.join(repo_path, "README.md")
-        if os.path.exists(readme_path):
-            with open(readme_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                # Limit to first 3000 chars to avoid context overflow
-                if len(content) > 3000:
-                    content = content[:3000] + "\n\n... (README truncated)"
-                return content
+        async with streamablehttp_client(MCP_SERVER_URL) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                
+                # Call the tool
+                result = await session.call_tool(tool_name, arguments=arguments)
+                
+                # Extract text content from result
+                if result.content:
+                    for content_block in result.content:
+                        if hasattr(content_block, 'text'):
+                            return content_block.text
+                        elif hasattr(content_block, 'data'):
+                            return str(content_block.data)
+                
+                # Check structured content
+                if result.structuredContent:
+                    return json.dumps(result.structuredContent)
+                
+                return "Tool executed successfully (no output)"
+                
     except Exception as e:
-        logger.warning(f"Failed to read README.md: {e}")
-    return ""
+        # Check for ExceptionGroup (Python 3.11+) or similar wrappers
+        if hasattr(e, 'exceptions'):
+            for sub_exc in e.exceptions:
+                logger.error(f"MCP sub-exception: {sub_exc}")
+        logger.error(f"MCP tool execution failed: {e}")
+        raise
+
+
+# ============= System Prompt =============
 
 def get_system_instruction(context_str: str, repo_name: str) -> str:
     """Generate the system instruction with context and CoT protocol."""
     current_date = datetime.now().strftime("%A, %B %d, %Y")
     
-    # Read README.md if available
     readme_content = get_readme_content()
     readme_section = ""
     if readme_content:
         readme_section = f"""
-=== PROJECT README.md AT ROOT OF REPO ===
+=== PROJECT README.md (ROOT) ===
 {readme_content}
+=== END README.md ===
+
+> **WARNING**: README files are often outdated. Treat the README as a hint or starting point, NOT as the source of truth.
+> The actual source of truth is ALWAYS the code itself. Verify any claims from the README by reading the actual implementation files.
+> If the README conflicts with what you observe in the code, trust the code.
 """
-    
+
+    # Get file tree for the repository
+    file_tree = get_repo_file_tree(max_entries=50)
+    file_tree_section = ""
+    if file_tree:
+        file_tree_section = f"""
+{file_tree}
+
+Use this file tree to understand the repository structure at a glance.
+For deeper exploration, use `list_files()` on specific directories.
+"""
+
     return f"""You are an expert software developer and coding assistant for the '{repo_name}' repository.
 You have full access to the source code of '{repo_name}' and are answering questions specifically about it.
 Your goal is to help the user with their question by using the tools provided to you. Answer all the key points while keeping it concise.
+AS SOON AS YOU HAVE SUFFICIENT INFORMATION, START ANSWERING THE USER'S QUESTION.
 
 Below are useful tools and instructions to help you answer the user's question:
 
@@ -428,82 +329,6 @@ The readme is displayed here if it exists, you do not need to use tools to explo
 {context_str}
 
 Use your tools (`list_files` root, read configs) to classify the repo type *before* diving into answering the question (application or library).
-
-=== YOUR TOOLS (USE THEM LIBERALLY) ===
-
-You have access to these tools to explore and understand the codebase. Use them whenever you need to or in doubt.
-
-**1. list_files(directory=".")**
-   - Lists all files and subdirectories in a directory
-   - ALWAYS call this first to see the full repo structure
-   - Then drill into subdirectories: `list_files("src")`, `list_files("tests")`, etc.
-   - Use this whenever you encounter an unfamiliar directory
-
-
-**2. read_file(filepath, max_lines=500)**
-   - Reads the full content of any file
-   - Use this to examine source code, configs, README, requirements, etc.
-   - Path is relative to repo root (e.g., "src/main.py")
-   - USE THIS LIBERALLY - read every file you're curious about
-   - If a file is truncated at 500 lines, read it in chunks or call again with a different range
-
-
-**3. rag_search(query)**
-   - Semantic search across the entire codebase
-   - Best for finding: function implementations, class definitions, usage patterns, error handling
-   - Example queries: "how is authentication handled", "database connection", "error handling", "API endpoints"
-   - Great for discovering patterns without reading every file
-
-
-**4. get_context_report()**
-   - Returns environment info (OS, Python version), repo structure, and dependencies
-   - Already provided above, but call this if you need a refresh or updated information
-
-
-**5. get_active_repo_path()**
-   - Returns the absolute filesystem path to the repository
-   - Useful if you need to understand full file system paths
-
-
-**6. execute_command(command, timeout=60)**
-   - Execute shell commands in the repo's virtual environment (auto-creates .venv if missing)
-   - Allowlisted commands only: pytest, pip list/install, git status/diff/log, ruff/flake8/mypy
-   - Example: `execute_command("pip list")`, `execute_command("pytest tests/")`
-
-
-**7. discover_tests()**
-   - Find all pytest test files and functions in the repository
-   - Use this before running tests to understand what's available
-
-
-**8. run_tests(test_path="", verbose=True)**
-   - Run pytest tests in the repository
-   - Can run all tests or specific file: `run_tests("tests/test_api.py")`
-
-
-**9. git_status()**
-   - Get current branch, modified/staged/untracked files
-   - Use this to understand the current state of changes
-
-
-**10. git_diff(filepath="")**
-   - View code changes (working directory vs HEAD)
-   - Can view all changes or specific file
-
-
-**11. git_log(filepath="", max_commits=10)**
-   - View recent commit history
-   - Useful for understanding when/why code changed
-
-
-**12. run_linter(filepath="")**
-   - Run code linter (auto-detects ruff/flake8/pylint)
-   - Reports style issues and potential bugs
-
-
-**13. find_function_usages(function_name)**
-   - Find all places a function is defined and called
-   - Uses AST analysis for accurate results
 
 === AGGRESSIVE EXPLORATION PRINCIPLE ===
 **DO NOT GIVE UP EARLY.** If you don't find what you need:
@@ -610,64 +435,66 @@ This helps the user follow your reasoning process. Do NOT silently call tools - 
 **ALWAYS** make sure you provide a full final answer at the end of your response that directly addresses the user's question.
 """
 
-def get_system_instruction_wrapper(context_details: str = "") -> str:
-    """Wrapper for get_system_instruction to be used as a tool."""
-    return get_system_instruction(context_details)
 
-def get_context_report_wrapper() -> str:
-    """Wrapper for get_context_report to be used as a tool."""
-    report = context_manager.get_context_report()
-    return report.to_string() if report else "Context not initialized."
+# ============= RAG Context Injection =============
 
-
-
-
-# MCP URL for local server
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8001/mcp")
-
-
-async def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
+def get_rag_context_for_query(query: str, repo_id: Optional[str] = None) -> str:
     """
-    Execute a tool via MCP client.
-    Connects to the MCP server and calls the specified tool.
-    """
-    if not MCP_CLIENT_AVAILABLE:
-        raise RuntimeError("MCP client not available")
+    Run a RAG query and format results as context for the model.
+    Returns up to 5 chunks with their metadata, formatted as a hint.
     
-    try:
-        async with streamablehttp_client(MCP_SERVER_URL) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                
-                # Call the tool
-                result = await session.call_tool(tool_name, arguments=arguments)
-                
-                # Extract text content from result
-                if result.content:
-                    for content_block in result.content:
-                        if hasattr(content_block, 'text'):
-                            return content_block.text
-                        elif hasattr(content_block, 'data'):
-                            return str(content_block.data)
-                
-                # Check structured content
-                if result.structuredContent:
-                    return json.dumps(result.structuredContent)
-                
-                return "Tool executed successfully (no output)"
-                
-    except Exception as e:
-        # Check for ExceptionGroup (Python 3.11+) or similar wrappers
-        if hasattr(e, 'exceptions'):
-            for sub_exc in e.exceptions:
-                logger.error(f"MCP sub-exception: {sub_exc}")
-        logger.error(f"MCP tool execution failed: {e}")
-        raise
-
-
-async def chat_with_agent(request: ChatRequest) -> ChatResponse:
+    Args:
+        query: The user's question to search for
+        repo_id: Optional repository ID to filter results
+        
+    Returns:
+        Formatted string with RAG results, or empty string if none found
     """
-    Process a chat request using Vertex AI with tools.
+    try:
+        from ..search import perform_hybrid_search
+        results = perform_hybrid_search(query, n_results=20, repo_id=repo_id)
+        
+        if not results:
+            logger.info(f"No RAG results found for query: {query[:50]}...")
+            return ""
+        
+        logger.info(f"Found {len(results)} RAG chunks for query: {query[:50]}...")
+        
+        context_parts = [
+            "## RAG Search Results (Optional Starting Point)",
+            "",
+            "The following code snippets may be relevant to your question. Use these as hints, but always verify with tools:",
+            ""
+        ]
+        
+        for i, chunk in enumerate(results, 1):
+            meta = chunk.get("metadata", {})
+            content = chunk.get("content", "")
+            # Truncate content to avoid overly long context
+            if len(content) > 800:
+                content = content[:800] + "\n... (truncated)"
+            
+            context_parts.append(f"### Chunk {i}")
+            context_parts.append(f"- **File:** `{meta.get('filepath', 'unknown')}`")
+            context_parts.append(f"- **Lines:** {meta.get('start_line', '?')}-{meta.get('end_line', '?')}")
+            context_parts.append(f"- **Type:** {meta.get('chunk_type', 'unknown')}")
+            context_parts.append(f"- **Relevance Score:** {chunk.get('combined_score', 0):.3f}")
+            context_parts.append(f"```")
+            context_parts.append(content)
+            context_parts.append("```")
+            context_parts.append("")
+        
+        return "\n".join(context_parts)
+    except Exception as e:
+        logger.warning(f"Failed to get RAG context: {e}")
+        return ""
+
+
+# ============= Agent Functions =============
+
+async def chat_with_mcp_agent(request: ChatRequest) -> ChatResponse:
+    """
+    Process a chat request using Vertex AI with tools via MCP.
     """
     try:
         project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
@@ -684,30 +511,68 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
 
         # Convert history to Vertex AI format
         contents = []
+        
+        # Get the last user message for RAG query
+        last_user_message = None
+        last_user_idx = -1
+        for i, msg in enumerate(request.messages):
+            if msg.role == "user":
+                last_user_message = msg.content
+                last_user_idx = i
+        
+        # Inject RAG context into the last user message
+        repo_id = active_repo_state.get_active_repo_id()
+        if last_user_message and last_user_idx >= 0:
+            rag_context = get_rag_context_for_query(last_user_message, repo_id)
+            if rag_context:
+                # Create enhanced message with RAG context prepended
+                enhanced_content = f"Use this content to jump where you need in your reasoning process:\n\n---RAG CONTENT---\n{rag_context}\n\n---\n\n**User Question:**\n{last_user_message}"
+                # Update the message content for the model
+                request.messages[last_user_idx].content = enhanced_content
+                logger.info(f"Injected RAG context ({len(rag_context)} chars) into user message")
+        
         for msg in request.messages:
             role = "user" if msg.role == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part(text=msg.content)]))
 
+
         # Get Automated Context Report
         context_report = context_manager.get_context_report()
         context_str = context_report.to_string() if context_report else "Context not initialized yet."
+        repo_name = context_report.repo_map.repo_name if context_report else "Unknown Repo"
         
-        repo_name = "Unknown Repo"
-        if context_report:
-            repo_name = context_report.repo_map.detected_name or context_report.repo_map.repo_name
+        # Truncate context to encourage tool usage
+        if len(context_str) > 2000:
+            context_str = context_str[:2000] + "\n\n... (context truncated - use tools to explore further)"
+            logger.info(f"Context truncated to 2000 chars for repo: {repo_name}")
+        
+        logger.info(f"Starting chat for repo: {repo_name}, context_len: {len(context_str)}")
 
         # Fetch tools dynamically from MCP server
         mcp_tools = await get_cached_mcp_tools()
         
+        # Log tool availability
+        if mcp_tools.function_declarations:
+            logger.info(f"Agent has {len(mcp_tools.function_declarations)} tools available")
+        else:
+            logger.warning("No tools available for agent - response will be text-only!")
+        
+        # Tool config to encourage tool usage (AUTO mode with low threshold)
+        tool_config = types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode="AUTO"
+            )
+        )
+        
         # Configuration
         config = types.GenerateContentConfig(
             tools=[mcp_tools],
+            tool_config=tool_config,
             temperature=0.0, # Low temp for tool use
             system_instruction=get_system_instruction(context_str, repo_name)
         )
 
         # 1. First turn: User -> Model (Model might call tools)
-        # Use async client
         response = await client.aio.models.generate_content(
             model=request.model,
             contents=contents,
@@ -715,9 +580,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         )
 
         # Handle tool calls (multi-turn loop)
-        # We'll allow a max of 15 tool turns to prevent infinite loops
         max_turns = 15
-        # Capture tool calls for trace
         tool_calls: List[ToolCall] = []
         
         final_response_text = ""
@@ -777,7 +640,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
             
             # Execute tools
             tool_outputs = []
-            contents.append(candidate.content) # Add model's tool call to history
+            contents.append(candidate.content)  # Add model's tool call to history
             
             for call in function_calls:
                 fn_name = call.name
@@ -788,12 +651,9 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
                 # Convert args to dict
                 args_dict = {k: v for k, v in fn_args.items()}
                 
-                # Execute tool via MCP (no legacy fallback)
+                # Execute tool via MCP
                 try:
-                    if MCP_CLIENT_AVAILABLE:
-                        result = await execute_mcp_tool(fn_name, args_dict)
-                    else:
-                        result = f"Error: MCP client not available, cannot execute tool {fn_name}"
+                    result = await execute_mcp_tool(fn_name, args_dict)
                 except Exception as e:
                     logger.error(f"MCP tool execution failed for {fn_name}: {e}")
                     result = f"Error executing {fn_name}: {e}"
@@ -808,7 +668,7 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
                 # Add to trace
                 tool_call_obj = ToolCall(
                     tool=fn_name,
-                    args=args_dict if 'args_dict' in locals() else {k:v for k,v in fn_args.items()},
+                    args=args_dict,
                     result=str(result),
                     status="completed"
                 )
@@ -854,9 +714,9 @@ async def chat_with_agent(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 
-async def chat_with_agent_stream(request: ChatRequest):
+async def chat_with_mcp_agent_stream(request: ChatRequest):
     """
-    Process a chat request using Vertex AI with tools, streaming the response.
+    Process a chat request using Vertex AI with tools via MCP, streaming the response.
     Yields JSON strings representing events:
     - {"type": "token", "content": "..."}
     - {"type": "tool_start", "tool": "name", "args": {...}}
@@ -878,26 +738,73 @@ async def chat_with_agent_stream(request: ChatRequest):
         )
 
         contents = []
+        
+        # Get the last user message for RAG query
+        last_user_message = None
+        last_user_idx = -1
+        for i, msg in enumerate(request.messages):
+            if msg.role == "user":
+                last_user_message = msg.content
+                last_user_idx = i
+        
+        # Inject RAG context into the last user message
+        repo_id = active_repo_state.get_active_repo_id()
+        if last_user_message and last_user_idx >= 0:
+            rag_context = get_rag_context_for_query(last_user_message, repo_id)
+            if rag_context:
+                # Create enhanced message with RAG context prepended
+                enhanced_content = f"{rag_context}\n\n---\n\n**User Question:**\n{last_user_message}"
+                # Update the message content for the model
+                request.messages[last_user_idx].content = enhanced_content
+                logger.info(f"[STREAM] Injected RAG context ({len(rag_context)} chars) into user message")
+        
         for msg in request.messages:
             role = "user" if msg.role == "user" else "model"
             contents.append(types.Content(role=role, parts=[types.Part(text=msg.content)]))
+
 
         # Get Automated Context Report
         context_report = context_manager.get_context_report()
         context_str = context_report.to_string() if context_report else "Context not initialized yet."
         repo_name = context_report.repo_map.repo_name if context_report else "Unknown Repo"
+        
+        # Truncate context to encourage tool usage
+        if len(context_str) > 2000:
+            context_str = context_str[:2000] + "\n\n... (context truncated - use tools to explore further)"
+            logger.info(f"[STREAM] Context truncated to 2000 chars for repo: {repo_name}")
+        
+        logger.info(f"[STREAM] Starting chat for repo: {repo_name}, context_len: {len(context_str)}")
 
         # Fetch tools dynamically from MCP server
         mcp_tools = await get_cached_mcp_tools()
         
+        # Log tool availability for streaming
+        if mcp_tools.function_declarations:
+            logger.info(f"[STREAM] Agent has {len(mcp_tools.function_declarations)} tools available")
+        else:
+            logger.warning("[STREAM] No tools available for agent!")
+        
+        # Tool config to encourage tool usage
+        tool_config = types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(
+                mode="AUTO"
+            )
+        )
+        
         config = types.GenerateContentConfig(
             tools=[mcp_tools],
+            tool_config=tool_config,
             temperature=0.0,
             system_instruction=get_system_instruction(context_str, repo_name)
         )
 
         max_turns = 15
         current_turn = 0
+        # Local retry counters (avoid static function attributes for concurrent requests)
+        malformed_retries = 0
+        max_malformed_retries = 3
+        empty_response_retries = 0
+        max_empty_retries = 3
         
         while current_turn < max_turns:
             # Stream the response using async client
@@ -909,7 +816,9 @@ async def chat_with_agent_stream(request: ChatRequest):
 
             # Accumulate full response for history and tool checking
             full_text = ""
-            function_calls = []
+            # Store original Part objects to preserve thought_signature for Gemini 3 Pro
+            collected_parts = []  # List of original Part objects from the response
+            function_call_parts = []  # Original parts containing function calls (preserves thought_signature)
             last_finish_reason = None
             
             # Iterate asynchronously
@@ -940,6 +849,9 @@ async def chat_with_agent_stream(request: ChatRequest):
                     continue
                 
                 for part in candidate.content.parts:
+                    # Collect all parts to preserve the original structure including thought_signature
+                    collected_parts.append(part)
+                    
                     if part.text:
                         full_text += part.text
                         logger.debug(f"[STREAM] Yielding text token: {part.text[:100]}...")
@@ -947,25 +859,32 @@ async def chat_with_agent_stream(request: ChatRequest):
                     
                     if part.function_call:
                         logger.debug(f"[STREAM] Found function call: {part.function_call.name}")
-                        function_calls.append(part.function_call)
+                        # Store the ORIGINAL Part object, not just the function_call
+                        # This preserves the thought_signature required by Gemini 3 Pro
+                        function_call_parts.append(part)
             
             # Log summary after stream completes
-            logger.info(f"[STREAM] Turn {current_turn} complete: text_len={len(full_text)}, function_calls={len(function_calls)}, finish_reason={last_finish_reason}")
+            logger.info(f"[STREAM] Turn {current_turn} complete: text_len={len(full_text)}, function_calls={len(function_call_parts)}, finish_reason={last_finish_reason}")
 
             # If we have function calls, execute them
-            if function_calls:
-                # Add the model's response (with function calls) to history
+            if function_call_parts:
+                # Add the model's response to history - use collected_parts directly
+                # This preserves thought_signature which is REQUIRED by Gemini 3 Pro
+                # If we have text + function calls, we need to build parts properly
                 model_parts = []
                 if full_text:
+                    # Add text part if we accumulated text
                     model_parts.append(types.Part(text=full_text))
-                for fc in function_calls:
-                    model_parts.append(types.Part(function_call=fc))
+                # Add ORIGINAL function call parts (preserves thought_signature)
+                model_parts.extend(function_call_parts)
                 
                 contents.append(types.Content(role="model", parts=model_parts))
                 
                 tool_outputs = []
                 
-                for call in function_calls:
+                # Iterate over the original parts to execute function calls
+                for part in function_call_parts:
+                    call = part.function_call
                     fn_name = call.name
                     fn_args = call.args
                     
@@ -978,13 +897,10 @@ async def chat_with_agent_stream(request: ChatRequest):
                     
                     logger.info(f"Agent calling tool: {fn_name} with args: {fn_args}")
                     
-                    # Execute tool via MCP (no legacy fallback)
+                    # Execute tool via MCP
                     args_dict = {k: v for k, v in fn_args.items()}
                     try:
-                        if MCP_CLIENT_AVAILABLE:
-                            result = await execute_mcp_tool(fn_name, args_dict)
-                        else:
-                            result = f"Error: MCP client not available, cannot execute tool {fn_name}"
+                        result = await execute_mcp_tool(fn_name, args_dict)
                     except Exception as e:
                         logger.error(f"MCP tool execution failed for {fn_name}: {e}")
                         result = f"Error executing {fn_name}: {e}"
@@ -1006,6 +922,8 @@ async def chat_with_agent_stream(request: ChatRequest):
                 # Append tool outputs to history
                 contents.append(types.Content(role="user", parts=tool_outputs))
                 current_turn += 1
+                # Reset malformed retry counter on successful tool execution
+                malformed_retries = 0
                 # Continue loop to get next response from model
                 continue
             
@@ -1016,10 +934,38 @@ async def chat_with_agent_stream(request: ChatRequest):
                     break
                 
                 # Handle empty response - log details and attempt recovery
+                is_malformed = last_finish_reason and "MALFORMED" in str(last_finish_reason)
                 logger.warning(
                     f"[STREAM] Empty response on turn {current_turn}. "
-                    f"finish_reason={last_finish_reason}, candidates_present={bool(chunk.candidates if 'chunk' in dir() else False)}"
+                    f"finish_reason={last_finish_reason}, is_malformed={is_malformed}, "
+                    f"candidates_present={bool(chunk.candidates if 'chunk' in dir() else False)}"
                 )
+                
+                # Track consecutive empty response retries to avoid infinite loops
+                if empty_response_retries >= max_empty_retries:
+                    logger.error(f"[STREAM] Max empty response retries ({max_empty_retries}) reached. Giving up.")
+                    error_msg = f"The model returned empty responses after {max_empty_retries} retries. Finish reason: {last_finish_reason}."
+                    yield json.dumps({"type": "error", "content": error_msg}) + "\n"
+                    break
+                
+                # Increment retry counter
+                empty_response_retries += 1
+                
+                # Handle MALFORMED_FUNCTION_CALL specifically - the model tried to call a function but failed
+                if is_malformed:
+                    malformed_retries += 1
+                    if malformed_retries >= max_malformed_retries:
+                        logger.error(f"[STREAM] Max malformed function call retries ({max_malformed_retries}) reached. Giving up.")
+                        yield json.dumps({"type": "error", "content": f"The model produced {max_malformed_retries} consecutive malformed function calls. Please try rephrasing your question."}) + "\n"
+                        break
+                    
+                    logger.warning(f"[STREAM] Malformed function call detected on turn {current_turn} (retry {malformed_retries}/{max_malformed_retries}). Prompting model to retry properly.")
+                    contents.append(types.Content(
+                        role="user", 
+                        parts=[types.Part(text="Your previous function call was malformed. Please try again with a properly formatted function call, or provide a text response if you have enough information to answer.")]
+                    ))
+                    current_turn += 1
+                    continue
                 
                 # Handle empty response after tool call - prompt the model to continue
                 if current_turn > 0:
@@ -1031,37 +977,53 @@ async def chat_with_agent_stream(request: ChatRequest):
                     current_turn += 1
                     continue
                 
-                # First turn empty response - retry once with tools disabled
-                logger.warning("[STREAM] First turn produced no output. Retrying with tools disabled...")
-                retry_config = types.GenerateContentConfig(
-                    tools=[],  # Disable tools to force text generation
-                    temperature=0.7,
-                    system_instruction=config.system_instruction
-                )
+                # First turn empty response - retry once with a simpler prompt
+                logger.warning("[STREAM] First turn produced no output. Retrying with simpler prompt...")
                 
-                retry_stream = await client.aio.models.generate_content_stream(
-                    model=request.model,
-                    contents=contents,
-                    config=retry_config
-                )
+                # Add a simpler user prompt to help the model
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(text="Please start by calling list_files() to see the repository structure.")]
+                ))
+                current_turn += 1
                 
-                retry_text = ""
-                async for retry_chunk in retry_stream:
-                    if retry_chunk.candidates and retry_chunk.candidates[0].content:
-                        for part in retry_chunk.candidates[0].content.parts:
-                            if part.text:
-                                retry_text += part.text
-                                yield json.dumps({"type": "token", "content": part.text}) + "\n"
-                
-                if retry_text:
-                    logger.info(f"[STREAM] Retry succeeded with {len(retry_text)} chars")
+                # If we've already retried multiple times, try without tools
+                if current_turn > 2 and empty_response_retries >= 2:
+                    logger.warning("[STREAM] Multiple retries failed. Trying with tools disabled...")
+                    retry_config = types.GenerateContentConfig(
+                        tools=[],  # Disable tools to force text generation
+                        temperature=0.7,
+                        system_instruction=config.system_instruction
+                    )
+                    
+                    retry_stream = await client.aio.models.generate_content_stream(
+                        model=request.model,
+                        contents=contents,
+                        config=retry_config
+                    )
+                    
+                    retry_text = ""
+                    async for retry_chunk in retry_stream:
+                        if retry_chunk.candidates and retry_chunk.candidates[0].content:
+                            for part in retry_chunk.candidates[0].content.parts:
+                                if part.text:
+                                    retry_text += part.text
+                                    yield json.dumps({"type": "token", "content": part.text}) + "\n"
+                    
+                    if retry_text:
+                        logger.info(f"[STREAM] Retry succeeded with {len(retry_text)} chars")
+                        # Local counters reset automatically on success
+                        break
+                    
+                    # Still no response - yield error to frontend
+                    error_msg = f"The model returned no response. Finish reason: {last_finish_reason}. This may indicate the input is too long or there's a content filtering issue."
+                    logger.error(f"[STREAM] {error_msg}")
+                    yield json.dumps({"type": "error", "content": error_msg}) + "\n"
                     break
                 
-                # Still no response - yield error to frontend
-                error_msg = f"The model returned no response. Finish reason: {last_finish_reason}. This may indicate the input is too long or there's a content filtering issue."
-                logger.error(f"[STREAM] {error_msg}")
-                yield json.dumps({"type": "error", "content": error_msg}) + "\n"
-                break
+                continue
+        
+        # Stream completed (local retry counters automatically go out of scope)
 
     except Exception as e:
         logger.exception("Chat stream failed")

@@ -12,6 +12,7 @@ from ..models import EnvInfo, RepoMap, RAGQueryRequest
 from ..search import perform_hybrid_search
 from google import genai
 import os
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ async def generate_runbook_content(
     dependency_analysis: List[DependencyStatus],
     project_id: str, 
     location: str,
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-3-pro-preview"
 ) -> str:
     """
     Generate the runbook content using LLM with RAG and Dependency Analysis.
@@ -58,14 +59,24 @@ async def generate_runbook_content(
         ])
 
     # 3. Construct a context-rich prompt
+    repo_name_display = repo_map.detected_name or repo_map.repo_name
+    readme_status = "Found" if repo_map.readme_exists else "Not Found"
+    current_date = datetime.now().strftime("%A, %B %d, %Y")
+
     prompt = f"""
-You are an expert DevOps engineer and Technical Writer. Your task is to generate a "Quick Start / Runbook" for a developer who wants to run this repository.
+You are an expert DevOps engineer and Technical Writer. Your task is to generate a "Quick Start / Runbook" for a developer who wants to run this repository: '{repo_name_display}'.
+
+Current Date: {current_date}
 
 CONTEXT:
 
 1. **Repository Structure**:
+Name: {repo_name_display} (Folder: {repo_map.repo_name})
+Type: {repo_map.repo_type}
+Last Updated: {repo_map.last_updated} (Approximate)
+Structure:
 {repo_map.structure}
-Last Updated: {repo_map.last_updated}
+Last Updated: {repo_map.last_updated} (Approximate - inferred from file system or git logs)
 
 2. **Detected Entry Points**:
 {repo_map.entry_points}
@@ -83,28 +94,33 @@ Use these snippets as ground truth for commands if relevant:
 - Python: {env_info.python_version}
 - GPU/CUDA: {env_info.gpu_info} (Available: {env_info.cuda_available})
 
-TASK:
+IMPORTANT!!! TASK:
 Create a Markdown runbook (`RUNBOOK.md`) that explains:
 1. What is the purpose of this repository?
 2. **Prerequisites**: 
-   - List required tools.
+   - List required system info (e.g., OS, Python, GPU/CUDA) and suggest if your current system can run this repository. Analyze the need for GPU.
+   - List required dependencies and if you need to address any dependency issues.
    - If the dependency version is different from the required version, warn the user that dependencies might be outdated or incompatible with modern Python versions.
    - **Time Rot Warning**: If the "Last Updated" date is old (e.g. > 1 year), warn the user that dependencies might be outdated or incompatible with modern Python versions.
-3. **Setup**: 
-   - Provide the suggested commands to install dependencies.
-   - Use the "Retrieved Setup Instructions" to find the correct commands (e.g. `pip install -r requirements.txt` vs `poetry install`).
-   - Provide the suggested commands to update the dependencies that may be outdated, and label it as optional.
-   - Address environment limitations (e.g. if CUDA is missing).
+3. **Setup**:
+   - **If Type=library**: Suggest `pip install {repo_name_display}` (public) or `pip install .` (local). Avoid `git clone` unless dev.
+   - **If Type=application**: Suggest `git clone` + install deps (e.g., `pip install -r requirements.txt`).
+   - Be specific about the libraries to install and the commands to run. e.g. if there is a requirements.txt, just run `pip install -r requirements.txt`. Else, give instructions to install what dependencies are needed.
 4. **Execution**: 
-   - Provide the suggested commands to run the repository after updating the dependencies.
+    - Commands to run/test.
+    - Use your thinking to determine the best way to run the application.
 
-Keep it concise, actionable, and specific to the provided file structure.
+Style: Concise, actionable, Markdown.
+**IMPORTANT**:
+- Be brief but include all necessary information. Do not include generic filler text.
+- Do not repeat the same instructions.
+
 """
 
     # 4. Call Vertex AI
     
     # Fallback models in order
-    FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+    FALLBACK_MODELS = ["gemini-3-pro-preview-lite", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
     models_to_try = [model] + FALLBACK_MODELS
     # Remove duplicates
     unique_models = []

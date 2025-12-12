@@ -5,7 +5,7 @@ Builds a structural map of the repository, identifying entry points and dependen
 import os
 import json
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from ..models import RepoMap
 
@@ -181,6 +181,113 @@ def get_last_updated_date(root_path: str) -> str:
         
     return "Unknown"
 
+def detect_repo_name_and_readme(root_path: str) -> tuple[Optional[str], bool]:
+    """
+    Detect repository name from README or configuration files.
+    Returns (detected_name, readme_exists).
+    """
+    readme_exists = False
+    detected_name = None
+    
+    # Check for README
+    readme_candidates = ['README.md', 'README.rst', 'README.txt', 'README']
+    readme_path = None
+    
+    for candidate in readme_candidates:
+        # Case insensitive check
+        for file in os.listdir(root_path):
+            if file.lower() == candidate.lower():
+                readme_path = os.path.join(root_path, file)
+                readme_exists = True
+                break
+        if readme_exists:
+            break
+            
+    # Try to extract name from README (First H1)
+    if readme_path:
+        try:
+            with open(readme_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('# '):
+                        detected_name = line[2:].strip()
+                        break
+                    if line.startswith('='): # RST style
+                        # Previous line was title
+                        pass 
+        except Exception:
+            pass
+
+    # If no name from README, try pyproject.toml
+    if not detected_name:
+        toml_path = os.path.join(root_path, 'pyproject.toml')
+        if os.path.exists(toml_path):
+            try:
+                with open(toml_path, 'r') as f:
+                    for line in f:
+                        if line.strip().startswith('name ='):
+                            detected_name = line.split('=')[1].strip().strip('"').strip("'")
+                            break
+            except Exception:
+                pass
+
+    # Try package.json
+    if not detected_name:
+        pkg_path = os.path.join(root_path, 'package.json')
+        if os.path.exists(pkg_path):
+            try:
+                with open(pkg_path, 'r') as f:
+                    data = json.load(f)
+                    detected_name = data.get('name')
+            except Exception:
+                pass
+
+    return detected_name, readme_exists
+
+def detect_repo_type(root_path: str) -> str:
+    """
+    Detect if the repo is a library (pip installable) or an application (git clone & run).
+    Returns: 'library', 'application', 'script', or 'unknown'
+    """
+    # 1. Check for explicit package definition (Strong signal for Library)
+    if os.path.exists(os.path.join(root_path, 'setup.py')):
+        return "library"
+        
+    if os.path.exists(os.path.join(root_path, 'pyproject.toml')):
+        try:
+            with open(os.path.join(root_path, 'pyproject.toml'), 'r') as f:
+                content = f.read()
+                if '[build-system]' in content or '[tool.poetry]' in content:
+                    return "library"
+        except Exception:
+            pass
+
+    # 2. Check for Application signals
+    app_indicators = ['Dockerfile', 'docker-compose.yml', 'manage.py', 'wsgi.py', 'asgi.py']
+    for indicator in app_indicators:
+        if os.path.exists(os.path.join(root_path, indicator)):
+            return "application"
+            
+    # 3. Check for Node.js App vs Lib
+    if os.path.exists(os.path.join(root_path, 'package.json')):
+        try:
+            with open(os.path.join(root_path, 'package.json'), 'r') as f:
+                data = json.load(f)
+                if 'scripts' in data and 'start' in data['scripts']:
+                    return "application"
+                if 'main' in data: # likely a lib if it has main but no start? ambiguous.
+                    pass 
+        except Exception:
+            pass
+
+    # 4. Fallback: Check structure
+    # If it has requirements.txt but no setup.py, it's likely an app
+    if os.path.exists(os.path.join(root_path, 'requirements.txt')):
+        return "application"
+
+    return "unknown"
+
+
 def map_repo(repo_path: str, repo_name: str) -> RepoMap:
     """Generate a full repository map."""
     logger.info(f"Mapping repository: {repo_name} at {repo_path}")
@@ -189,8 +296,10 @@ def map_repo(repo_path: str, repo_name: str) -> RepoMap:
     entry_points = find_entry_points(repo_path)
     dependencies = parse_dependencies(repo_path)
     last_updated = get_last_updated_date(repo_path)
+    detected_name, readme_exists = detect_repo_name_and_readme(repo_path)
+    repo_type = detect_repo_type(repo_path)
     
-    logger.info(f"Repo Map Complete: {len(entry_points)} entry points found. Last updated: {last_updated}")
+    logger.info(f"Repo Map Complete: {len(entry_points)} entry points found. Type: {repo_type}. Last updated: {last_updated}. README: {readme_exists}")
     
     return RepoMap(
         repo_name=repo_name,
@@ -198,5 +307,8 @@ def map_repo(repo_path: str, repo_name: str) -> RepoMap:
         structure=structure,
         entry_points=entry_points,
         dependencies=dependencies,
-        last_updated=last_updated
+        last_updated=last_updated,
+        readme_exists=readme_exists,
+        detected_name=detected_name,
+        repo_type=repo_type
     )

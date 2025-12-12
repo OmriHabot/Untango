@@ -48,9 +48,18 @@ from .active_repo_state import active_repo_state
 from .search import perform_hybrid_search, perform_vector_search, tokenize_code
 from rank_bm25 import BM25Okapi
 from .logger import setup_logging, get_logger
-from .agents.chat_agent import chat_with_agent, chat_with_agent_stream
+from .agents.mcp_agent import chat_with_mcp_agent, chat_with_mcp_agent_stream
 from .chat_history import chat_history_manager
 from .context_manager import context_manager
+
+# Import MCP server
+try:
+    from .mcp_server import mcp as mcp_server
+    MCP_AVAILABLE = True
+except ImportError as e:
+    MCP_AVAILABLE = False
+    import warnings
+    warnings.warn(f"MCP server not available: {e}")
 
 
 LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
@@ -60,11 +69,38 @@ setup_logging(log_level=LOG_LEVEL, json_logs=JSON_LOGS)
 logger = get_logger(__name__)
 
 
+# Lifespan context manager for startup/shutdown
+import contextlib
+
+@contextlib.asynccontextmanager
+async def lifespan(app):
+    """Manage application lifecycle including MCP session manager."""
+    logger.info("Starting application...")
+    
+    if MCP_AVAILABLE:
+        logger.info("Starting MCP server session manager...")
+        async with mcp_server.session_manager.run():
+            logger.info("MCP server ready")
+            yield
+    else:
+        logger.warning("MCP server not available, running without MCP")
+        yield
+    
+    logger.info("Application shutdown complete")
+
+
 app = FastAPI(
     title="RAG Backend",
-    description="Intelligent code chunking and retrieval with hybrid search",
-    version="1.0.0"
+    description="Intelligent code chunking and retrieval with hybrid search. MCP endpoint available at /mcp.",
+    version="1.0.0",
+    lifespan=lifespan
 )
+
+# Mount MCP server if available
+if MCP_AVAILABLE:
+    # Configure MCP to mount at root of the /mcp path
+    mcp_server.settings.streamable_http_path = "/"
+    app.mount("/mcp", mcp_server.streamable_http_app())
 
 # Configure CORS
 app.add_middleware(
@@ -660,7 +696,7 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
         if active_repo_id and active_repo_id != "default":
             chat_history_manager.add_message(active_repo_id, request.messages[-1])
 
-    response = await chat_with_agent(request)
+    response = await chat_with_mcp_agent(request)
     
     # Save assistant response
     if active_repo_id and active_repo_id != "default":
@@ -705,7 +741,7 @@ async def chat_stream_endpoint(request: ChatRequest):
         tool_calls = []
         current_tool_call = None
         
-        async for chunk in chat_with_agent_stream(request):
+        async for chunk in chat_with_mcp_agent_stream(request):
             # Capture content for history
             try:
                 # Chunk might be multiple lines or raw NDJSON

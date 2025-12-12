@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { X, Github, FolderOpen, Loader2, AlertCircle, Terminal, Eye, EyeOff, RefreshCw, CheckCircle } from 'lucide-react';
 import { api } from '../api/client';
 import { useRepoStore } from '../store/repoStore';
@@ -8,7 +8,6 @@ import {
   scanDirectoryWithSummary,
   createZipBundle,
   computeFileHashes,
-  findChangedFiles,
   formatFileSize,
   ScannedFile
 } from '../utils/localDirectoryUtils';
@@ -35,11 +34,7 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
   
   // Watch mode state
   const [watchEnabled, setWatchEnabled] = useState(false);
-  const [isWatching, setIsWatching] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-  const [syncCount, setSyncCount] = useState(0);
   const fileHashesRef = useRef<Record<string, string>>({});
-  const watchIntervalRef = useRef<number | null>(null);
   const repoIdRef = useRef<string | null>(null);
   
   // Shared state
@@ -47,17 +42,14 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   
-  const { pollStatus, fetchRepositories } = useRepoStore();
+  const { pollStatus, fetchRepositories, startWatch, stopWatch, watchStates } = useRepoStore();
   const fsApiSupported = isFileSystemAccessSupported();
-
-  // Cleanup watch interval on unmount
-  useEffect(() => {
-    return () => {
-      if (watchIntervalRef.current) {
-        clearInterval(watchIntervalRef.current);
-      }
-    };
-  }, []);
+  
+  // Get current watch state from store
+  const currentWatchState = repoIdRef.current ? watchStates[repoIdRef.current] : null;
+  const isWatching = currentWatchState?.isWatching ?? false;
+  const lastSyncTime = currentWatchState?.lastSyncTime ?? null;
+  const syncCount = currentWatchState?.syncCount ?? 0;
 
   const handlePickDirectory = async () => {
     setError(null);
@@ -136,9 +128,9 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
       pollStatus(response.repo_id);
       await fetchRepositories();
       
-      if (watchEnabled) {
-        // Start watch mode instead of closing
-        startWatching();
+      if (watchEnabled && directoryHandle) {
+        // Start watch mode using global store
+        startWatch(response.repo_id, directoryHandle, fileHashesRef.current);
         setSuccessMessage(`Repository "${directoryName}" ingested. Watch mode active.`);
       } else {
         onClose();
@@ -153,53 +145,14 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
     }
   };
 
-  const startWatching = useCallback(() => {
-    if (!directoryHandle || watchIntervalRef.current) return;
-    
-    setIsWatching(true);
-    
-    // Poll every 3 seconds
-    watchIntervalRef.current = window.setInterval(async () => {
-      try {
-        // Re-scan directory
-        const result = await scanDirectoryWithSummary(directoryHandle);
-        const newHashes = await computeFileHashes(result.files);
-        
-        // Find changed files
-        const changedPaths = findChangedFiles(fileHashesRef.current, newHashes);
-        
-        if (changedPaths.length > 0 && repoIdRef.current) {
-          // Get the changed files
-          const changedFiles = result.files.filter(f => changedPaths.includes(f.path));
-          
-          // Create bundle of changed files
-          const bundle = await createZipBundle(changedFiles);
-          
-          // Sync to server
-          await api.syncRepository(bundle, repoIdRef.current);
-          
-          // Update state
-          fileHashesRef.current = newHashes;
-          setScannedFiles(result.files);
-          setLastSyncTime(new Date());
-          setSyncCount(prev => prev + 1);
-        }
-      } catch (err) {
-        console.error('Watch sync error:', err);
-      }
-    }, 3000);
-  }, [directoryHandle]);
-
-  const stopWatching = useCallback(() => {
-    if (watchIntervalRef.current) {
-      clearInterval(watchIntervalRef.current);
-      watchIntervalRef.current = null;
+  const handleStopWatching = useCallback(() => {
+    if (repoIdRef.current) {
+      stopWatch(repoIdRef.current);
     }
-    setIsWatching(false);
-  }, []);
+  }, [stopWatch]);
 
   const handleClearDirectory = () => {
-    stopWatching();
+    handleStopWatching();
     setDirectoryHandle(null);
     setScannedFiles([]);
     setDirectoryName('');
@@ -207,8 +160,6 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
     setSuccessMessage(null);
     fileHashesRef.current = {};
     repoIdRef.current = null;
-    setSyncCount(0);
-    setLastSyncTime(null);
   };
 
   return (
@@ -416,7 +367,7 @@ export const IngestModal: React.FC<Props> = ({ onClose }) => {
                             </div>
                           </div>
                           <button
-                            onClick={stopWatching}
+                            onClick={handleStopWatching}
                             className="px-3 py-1 text-sm bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded transition-colors"
                           >
                             Stop

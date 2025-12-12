@@ -32,7 +32,7 @@ class QueryRequest(BaseModel):
 class InferenceRequest(BaseModel):
     """Request model for Vertex AI inference"""
     prompt: str = Field(..., description="Prompt for the AI model", min_length=1, max_length=10000)
-    model: str = Field(default="gemini-2.5-flash", description="Model to use for inference")
+    model: str = Field(default="gemini-3-pro-preview", description="Model to use for inference")
 
 
 class ChunkMetadata(BaseModel):
@@ -95,7 +95,7 @@ class RAGQueryRequest(BaseModel):
         ge=0.0,
         description="Minimum BM25 score before RRF fusion"
     )
-    model: str = Field(default="gemini-2.5-flash", description="Model to use for inference")
+    model: str = Field(default="gemini-3-pro-preview", description="Model to use for inference")
 
 
 class RetrievedChunk(BaseModel):
@@ -136,6 +136,9 @@ class RepoMap(BaseModel):
     entry_points: List[str]
     dependencies: List[str]
     last_updated: Optional[str] = None
+    readme_exists: bool = False
+    detected_name: Optional[str] = None
+    repo_type: str = "unknown"  # "application", "library", "script", "unknown"
 
 
 class RunbookRequest(BaseModel):
@@ -180,7 +183,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for chat"""
     messages: List[Message] = Field(..., description="Chat history")
-    model: str = Field(default="gemini-2.5-flash", description="Model to use")  # Field(default="gemini-2.5-flash", description="Model to use")
+    model: str = Field(default="gemini-3-pro-preview", description="Model to use")  # Field(default="gemini-3-pro-preview", description="Model to use")
 
 
 class ChatResponse(BaseModel):
@@ -226,6 +229,8 @@ class RepositorySummary(BaseModel):
     repo_id: str
     name: str
     path: str
+    source_type: Optional[str] = None
+    source_location: Optional[str] = None
 
 
 class ListRepositoriesResponse(BaseModel):
