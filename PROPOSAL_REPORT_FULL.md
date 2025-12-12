@@ -1,4 +1,4 @@
-# Untango: Dependency-Aware Agentic Code Assistance via MCP and Gemini 2.0 Flash
+# Untango: Dependency-Aware Agentic Code Assistance via MCP and Gemini 3.0 Pro
 
 **COMSE6998-015: Introduction to LLM-based Generative AI Systems**
 **Fall 2025**
@@ -13,7 +13,7 @@ Modern AI-powered code assistants like GitHub Copilot and Cursor have transforme
 We present **Untango**, a dependency-aware agentic code assistant that addresses this gap. Untango leverages three key innovations:
 
 1. **Model Context Protocol (MCP)**: A standardized protocol for tool discovery and execution, enabling clean separation between the LLM agent and its capabilities
-2. **Gemini 2.0 Flash (via Vertex AI)**: Google's state-of-the-art multimodal model with native function calling for reliable agentic tool use
+2. **Gemini 3.0 Pro (via Vertex AI)**: Google's state-of-the-art multimodal model with native function calling for reliable agentic tool use
 3. **Deep Exploration Workflow**: A mandatory multi-step reasoning process that ensures the agent thoroughly explores codebases before answering
 
 Our qualitative evaluation demonstrates that Untango provides significantly richer, more accurate responses than traditional RAG systems by:
@@ -35,467 +35,562 @@ Furthermore, **passive RAG retrieval fails for complex queries**. A single embed
 
 ### 2.2 Problem Statement
 
-We identify four key limitations in current code assistance tools:
+We identify the following key limitation and preserve the rest of the existing functionality in current code assistance tools:
 
 1. **Dependency Blindness**: Tools index only local files, missing critical context from imported libraries. This leads to errors when debugging issues that originate in third-party code.
 
-2. **Passive Retrieval**: Standard RAG pipelines perform one-shot retrieval. If the initial search misses the relevant context, the model fails to answer.
+2. **Local Context Retrieval**: Existing RAG pipelines effectively retrieve relevant code snippets from the user's local files as additional context is needed, providing a solid foundation for answering questions about the immediate codebase.
 
-3. **Limited Reasoning**: Retrieved context is directly concatenated to the prompt without strategic analysis. The model cannot "realize" it is missing information and request more.
-
-4. **No Tool Standard**: Each code assistant implements its own proprietary tool interface, making it difficult to extend capabilities or integrate with existing developer infrastructure.
+3. **Syntactic Code Generation**: Current models excel at generating syntactically correct code and explanations based on the provided context, a capability we retain while enhancing the information retrieval process.
 
 ### 2.3 Research Questions
 
-This work addresses the following research questions:
+This work addresses the following research question:
 
-* **RQ1**: Does an agentic architecture that actively explores code outperform passive RAG retrieval?
-  * *Hypothesis*: Multi-turn tool-using agents provide more accurate and complete answers by reading actual source files rather than relying on embedding similarity.
-
-* **RQ2**: Can the Model Context Protocol (MCP) provide a clean abstraction for code exploration tools?
-  * *Hypothesis*: Standardizing tool interfaces via MCP enables better separation of concerns and easier extensibility.
-
-* **RQ3**: What system prompt design maximizes agent exploration behavior?
-  * *Hypothesis*: Mandatory tool-use constraints and deep exploration workflows reduce hallucination and improve answer quality.
+* **RQ3**: What system prompt design and combination of tools maximizes the quality of the agent's responses?
+  * *Hypothesis*: Mandatory tool-use constraints and deep exploration capabilities such as inspecting code of installed dependencies reduce hallucination and improve answer quality.
 
 ### 2.4 Contributions
 
 We make the following contributions:
 
-1. **Untango System**: An open-source, production-ready code assistant featuring an MCP-based tool server, React frontend, and Gemini 2.0 Flash agentic backend.
+1. **Untango System**: An open-source, production-ready code assistant featuring an MCP-based tool server, React frontend, and Gemini 3.0 Pro agentic backend.
 
 2. **MCP Tool Server**: A comprehensive set of 11 tools exposed via the Model Context Protocol, including RAG search, file reading, git operations, test discovery, and linting.
 
 3. **Deep Exploration Workflow**: A novel system prompt architecture that mandates thorough codebase exploration before answering, with specific strategies for different repository types.
 
-4. **Qualitative Evaluation Framework**: Comparative case studies demonstrating the superiority of agentic exploration over passive RAG for real-world code understanding tasks.
-
 ---
 
 ## 3. System Architecture
 
-### 3.1 Overview
+### 3.1 High-Level Overview
 
-Untango consists of four primary components:
+Untango consists of four primary components working together in a layered architecture:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         React Frontend                           │
-│   (Chat UI, Repository Ingestion, Watch Mode, Streaming)        │
-└─────────────────────────┬───────────────────────────────────────┘
-                          │ HTTP/SSE
-┌─────────────────────────▼───────────────────────────────────────┐
-│                        FastAPI Backend                           │
-│     ┌──────────────────────────────────────────────────────┐    │
-│     │              MCP Agent (Gemini 2.0 Flash)             │    │
-│     │  - Multi-turn reasoning loop (ReAct pattern)          │    │
-│     │  - Dynamic tool discovery via MCP                      │    │
-│     │  - Streaming response generation                       │    │
-│     └────────────────────────┬─────────────────────────────┘    │
-│                              │ MCP Protocol                      │
-│     ┌────────────────────────▼─────────────────────────────┐    │
-│     │                   MCP Tool Server                      │    │
-│     │  - rag_search: Hybrid vector + BM25 retrieval         │    │
-│     │  - read_file: Source code inspection                   │    │
-│     │  - list_files: Directory traversal                     │    │
-│     │  - git_status/diff/log: Version control                │    │
-│     │  - run_tests/run_linter: Quality checks                │    │
-│     │  - find_function_usages: AST-based analysis           │    │
-│     └────────────────────────┬─────────────────────────────┘    │
-│                              │                                   │
-│     ┌────────────────────────▼─────────────────────────────┐    │
-│     │                    ChromaDB                            │    │
-│     │        (Vector embeddings + BM25 index)               │    │
-│     └──────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              React Frontend                                      │
+│      (Chat UI, Repository Ingestion, Watch Mode, Streaming, Tool Visualization) │
+└─────────────────────────────────┬───────────────────────────────────────────────┘
+                                  │ HTTP/SSE (Server-Sent Events)
+┌─────────────────────────────────▼───────────────────────────────────────────────┐
+│                          FastAPI Backend (app/main.py)                           │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    MCP Agent (app/agents/mcp_agent.py)                     │ │
+│  │   ╔══════════════════════════════════════════════════════════════════════╗ │ │
+│  │   ║  • System Prompt Engineering with Context Injection                  ║ │ │
+│  │   ║  • Multi-turn ReAct Reasoning Loop (up to 15 turns)                 ║ │ │
+│  │   ║  • Dynamic Tool Discovery via MCP Protocol                           ║ │ │
+│  │   ║  • RAG Context Pre-injection for Query Augmentation                  ║ │ │
+│  │   ║  • Full Streaming Response Generation                                ║ │ │
+│  │   ╚══════════════════════════════════════════════════════════════════════╝ │ │
+│  └──────────────────────────────┬─────────────────────────────────────────────┘ │
+│                                 │ MCP Protocol (HTTP Transport)                   │
+│  ┌──────────────────────────────▼─────────────────────────────────────────────┐ │
+│  │                    MCP Tool Server (app/mcp_server.py)                      │ │
+│  │   ┌─────────────────┬─────────────────┬─────────────────────────────────┐  │ │
+│  │   │  File System    │   Git Tools     │   Code Quality                  │  │ │
+│  │   │  • read_file    │   • git_status  │   • run_linter                  │  │ │
+│  │   │  • list_files   │   • git_diff    │   • run_tests                   │  │ │
+│  │   │  • rag_search   │   • git_log     │   • discover_tests              │  │ │
+│  │   ├─────────────────┴─────────────────┴─────────────────────────────────┤  │ │
+│  │   │             AST Analysis: find_function_usages                       │  │ │
+│  │   └──────────────────────────────────────────────────────────────────────┘  │ │
+│  └──────────────────────────────┬─────────────────────────────────────────────┘ │
+│                                 │                                                 │
+│  ┌──────────────────────────────▼─────────────────────────────────────────────┐ │
+│  │              Supporting Agents (app/agents/)                                │ │
+│  │   • repo_mapper.py     - Repository structure analysis & type detection    │ │
+│  │   • env_scanner.py     - Environment detection (OS, Python, GPU/CUDA)      │ │
+│  │   • runbook_generator.py - Automated runbook generation with LLM          │ │
+│  └──────────────────────────────┬─────────────────────────────────────────────┘ │
+│                                 │                                                 │
+│  ┌──────────────────────────────▼─────────────────────────────────────────────┐ │
+│  │                     RAG & Storage Layer                                     │ │
+│  │   • ChromaDB (Vector Store) with Hybrid Search                             │ │
+│  │   • sentence-transformers (all-MiniLM-L6-v2) embeddings                    │ │
+│  │   • BM25 Keyword Search with Reciprocal Rank Fusion                        │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Model Context Protocol (MCP)
+### 3.2 Backend Directory Structure
 
-MCP is an open protocol that standardizes how AI models interact with external tools and data sources. Untango implements MCP to provide:
+The backend is organized into the following modules in the `app/` directory:
 
-**Tool Discovery**: The agent dynamically discovers available tools at runtime by querying the MCP server. This enables adding new capabilities without modifying the agent.
-
-**Type-Safe Execution**: Tools are defined with JSON Schema input specifications, ensuring the LLM provides correctly-typed arguments.
-
-**Clean Separation**: The tool implementations (file I/O, git commands, test runners) are fully decoupled from the LLM agent logic.
-
-Our MCP server exposes 11 tools:
-
-| Tool | Description |
-|------|-------------|
-| `rag_search(query)` | Hybrid semantic + keyword search across ingested code |
-| `read_file(filepath, max_lines)` | Read source file contents |
-| `list_files(directory)` | List directory contents with type indicators |
-| `find_function_usages(function_name)` | AST-based usage analysis |
-| `git_status()` | Current branch and file states |
-| `git_diff(filepath)` | Uncommitted changes |
-| `git_log(filepath, max_commits)` | Commit history |
-| `discover_tests()` | Find pytest test functions |
-| `run_tests(test_path, verbose)` | Execute pytest |
-| `run_linter(filepath)` | Run ruff/flake8/pylint |
-| `get_active_repo_path()` | Get repository filesystem path |
-
-### 3.3 Gemini 2.0 Flash Integration
-
-We use **Gemini 2.0 Flash** via Google Vertex AI as our primary LLM. Key advantages include:
-
-- **Native Function Calling**: Built-in support for structured tool calls with typed arguments
-- **Long Context Window**: 1M+ token context for ingesting large codebases
-- **Multimodal Capabilities**: Future extensibility for diagram understanding
-- **Low Latency**: Optimized for real-time interactive use
-- **Cost Efficiency**: $0.30/M input tokens, $2.50/M output tokens
-
-The agent operates in a multi-turn loop with up to 15 tool-use turns per query, allowing deep exploration of complex codebases.
-
-### 3.4 Deep Exploration Workflow
-
-Unlike traditional RAG systems that perform single-shot retrieval, Untango mandates a comprehensive exploration workflow:
-
-**Step 1: Map the Territory**
-- Always call `list_files()` at the repository root
-- Explore major subdirectories (frontend/, backend/, api/, etc.)
-- Check for README files in each component
-
-**Step 2: Identify Key Files**
-- Docker configuration (Dockerfile, docker-compose.yml)
-- Package managers (package.json scripts, requirements.txt)
-- Entry points (main.py, index.js, app.py)
-- Environment config (.env.example, settings.py)
-
-**Step 3: Multi-Component Exploration**
-- For full-stack projects, explore EACH component separately
-- Read actual config files, not just READMEs
-- Provide instructions for running each component
-
-**Step 4: Code Following**
-- When seeing an import, read the imported module
-- Trace function calls to their definitions
-- Never guess based on names alone
-
-The system prompt explicitly states: "You are FORBIDDEN from answering questions about the codebase without calling at least one tool."
+```
+app/
+├── main.py                 # FastAPI application with all endpoints
+├── mcp_server.py           # MCP Tool Server exposing 11 tools
+├── models.py               # Pydantic request/response schemas
+├── database.py             # ChromaDB client initialization
+├── search.py               # Hybrid vector + BM25 search implementation
+├── chunker.py              # AST-based code chunking
+├── ingest_manager.py       # Repository ingestion with smart sync
+├── context_manager.py      # Automated context collection & dependency analysis
+├── repo_manager.py         # Repository lifecycle management
+├── active_repo_state.py    # Active repository state singleton
+├── chat_history.py         # Chat history persistence
+├── embeddings.py           # Sentence transformer embedding wrapper
+├── logger.py               # Structured logging configuration
+│
+├── agents/                 # AI Agent Modules
+│   ├── mcp_agent.py        # Primary MCP-native chat agent (Gemini 3.0 Pro)
+│   ├── chat_agent.py       # Legacy chat agent (with tool wrappers)
+│   ├── repo_mapper.py      # Repository structure analysis agent
+│   ├── env_scanner.py      # Environment scanning agent
+│   └── runbook_generator.py # LLM-powered runbook generation agent
+│
+└── tools/                  # Tool Implementation Modules
+    ├── __init__.py         # Exports all tool functions
+    ├── filesystem.py       # File reading and directory listing
+    ├── ast_tools.py        # AST-based code analysis
+    ├── git_tools.py        # Git operations (status, diff, log)
+    ├── test_runner.py      # Pytest discovery and execution
+    ├── code_quality.py     # Linter integration (ruff, flake8, pylint)
+    ├── dependencies.py     # Package path and dependency inspection
+    └── shell_execution.py  # Shell command execution utilities
+```
 
 ---
 
-## 4. Implementation Details
+## 4. ML/AI System Architecture
 
-### 4.1 Frontend Architecture
+### 4.1 Agent System Overview
 
-The React frontend provides:
+Untango implements a **multi-agent architecture** where different specialized agents handle distinct aspects of code understanding:
 
-- **Repository Ingestion**: Upload local directories via File System Access API or clone from GitHub
-- **Watch Mode**: Real-time file change detection with automatic re-sync
-- **Watch Status Indicator**: Visual indicators showing which repositories are being actively watched
-- **Streaming Chat**: Server-Sent Events (SSE) for real-time token streaming
-- **Tool Visualization**: Display of tool calls and results during agent reasoning
-
-### 4.2 Ingestion Pipeline
-
-Our AST-based ingestion pipeline:
-
-1. **Scan**: Traverse directory tree, respecting `.gitignore` and skip patterns
-2. **Parse**: Use Python AST to extract functions, classes, and modules
-3. **Chunk**: Create semantically meaningful chunks (one per function/class)
-4. **Embed**: Generate embeddings using sentence-transformers
-5. **Index**: Store in ChromaDB with metadata for hybrid search
-
-### 4.3 Hybrid Search
-
-We combine two retrieval strategies:
-
-- **Vector Search**: Semantic similarity using `all-MiniLM-L6-v2` embeddings
-- **BM25 Search**: Keyword matching with code-aware tokenization (handles snake_case, camelCase)
-- **Reciprocal Rank Fusion (RRF)**: Merge results with k=60
-
----
-
-## 5. Qualitative Evaluation
-
-### 5.1 Evaluation Methodology
-
-We evaluate Untango through comparative case studies, demonstrating the qualitative difference between:
-
-1. **Standard RAG**: Single-shot embedding retrieval with direct answer generation
-2. **Untango (Agentic)**: Multi-turn exploration with tool-verified answers
-
-For each case study, we document:
-- The user query
-- The exploration steps taken by the agent
-- The final answer quality and accuracy
-- Key insights that would be missed by passive retrieval
-
-### 5.2 Case Study 1: "How do I run this project?"
-
-**Query**: "How do I run this project?"
-
-**Standard RAG Response**:
-```
-Based on the README.md, you can run this project with:
-
-1. Clone the repository
-2. Run `pip install -r requirements.txt`
-3. Run `python main.py`
-
-This will start the application.
+```mermaid
+graph TB
+    subgraph "Primary Agent"
+        MCP["MCP Agent<br/>(mcp_agent.py)"]
+    end
+    
+    subgraph "Supporting Agents"
+        ENV["Environment Scanner<br/>(env_scanner.py)"]
+        REPO["Repo Mapper<br/>(repo_mapper.py)"]
+        RUN["Runbook Generator<br/>(runbook_generator.py)"]
+    end
+    
+    subgraph "Gemini 3.0 Pro"
+        LLM["Vertex AI<br/>gemini-3-pro-preview"]
+    end
+    
+    subgraph "MCP Tool Server"
+        TOOLS["11 Tools:<br/>rag_search, read_file, list_files,<br/>git_status, git_diff, git_log,<br/>run_tests, discover_tests,<br/>run_linter, find_function_usages,<br/>get_active_repo_path"]
+    end
+    
+    MCP --> LLM
+    LLM --> MCP
+    MCP --> TOOLS
+    TOOLS --> MCP
+    
+    ENV --> REPO
+    REPO --> RUN
+    RUN --> LLM
 ```
 
-**Untango Response** (after 8 tool calls):
-```
-This is a **full-stack application** with separate frontend and backend components.
+### 4.2 MCP Agent (`app/agents/mcp_agent.py`)
 
-## Backend (Python + FastAPI)
+The **MCP Agent** is the primary AI component, handling all user chat interactions:
 
-The backend runs via Docker Compose:
+#### Key Features:
 
-```bash
-cd /path/to/project
-docker-compose up --build -d
-```
+| Feature | Description |
+|---------|-------------|
+| **LLM Backend** | Gemini 3.0 Pro via Vertex AI (`gemini-3-pro-preview`) |
+| **Tool Discovery** | Dynamically fetches tool schemas from MCP server at runtime |
+| **Multi-Turn Loop** | Up to 15 tool-use turns per query for deep exploration |
+| **RAG Injection** | Pre-injects relevant code chunks into user queries |
+| **Streaming** | Full SSE streaming with token-by-token response |
+| **Context Awareness** | Injects repository context, README, and file tree |
 
-This starts:
-- `rag-backend` on port 8001 (FastAPI with Gemini integration)
-- `chromadb-server` on port 8000 (Vector database)
+#### Agent Loop Flow:
 
-## Frontend (React + Vite)
-
-```bash
-cd frontend
-pnpm install
-pnpm run dev
-```
-
-The frontend runs on http://localhost:5173
-
-## Environment Setup
-
-Copy `.env.example` to `.env` and configure:
-- `GOOGLE_CLOUD_PROJECT`: Your GCP project ID
-- `GOOGLE_CLOUD_LOCATION`: Region (default: "global")
-
-## Verification
-
-1. Backend health: `curl http://localhost:8001/health`
-2. Open frontend at http://localhost:5173
-3. Ingest a repository using the "+" button
-```
-
-**Analysis**: The standard RAG response relied on outdated README content. Untango:
-- Explored both root and subdirectories
-- Read `docker-compose.yml` to understand the container architecture
-- Read `frontend/package.json` to find the correct scripts
-- Read `.env.example` to identify required configuration
-- Provided step-by-step verified instructions
-
-### 5.3 Case Study 2: "How does authentication work?"
-
-**Query**: "How does authentication work in this codebase?"
-
-**Standard RAG Response**:
-```
-Based on the search results, there appears to be an authentication module in 
-`api/auth.py`. The code uses JWT tokens for authentication. Users authenticate 
-by providing credentials which are validated against the database.
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant FastAPI
+    participant MCPAgent
+    participant VertexAI
+    participant MCPServer
+    participant Tools
+    
+    User->>Frontend: Send message
+    Frontend->>FastAPI: POST /chat-stream
+    FastAPI->>MCPAgent: chat_with_mcp_agent_stream()
+    
+    MCPAgent->>MCPAgent: get_rag_context_for_query()
+    MCPAgent->>MCPAgent: Inject RAG context into message
+    MCPAgent->>MCPAgent: Build system prompt
+    MCPAgent->>MCPAgent: get_cached_mcp_tools()
+    
+    loop Up to 15 turns
+        MCPAgent->>VertexAI: generate_content(messages, tools)
+        VertexAI-->>MCPAgent: Response (text OR function_call)
+        
+        alt Function Call
+            MCPAgent->>MCPServer: execute_mcp_tool(name, args)
+            MCPServer->>Tools: Execute tool
+            Tools-->>MCPServer: Result
+            MCPServer-->>MCPAgent: Tool output
+            MCPAgent-->>Frontend: Stream tool_start/tool_end events
+        else Text Response
+            MCPAgent-->>Frontend: Stream token events
+        end
+    end
+    
+    MCPAgent-->>Frontend: Stream usage stats
+    Frontend-->>User: Display response
 ```
 
-**Untango Response** (after 12 tool calls):
-```
-## Authentication Architecture
+#### Core Functions:
 
-This application uses **Vertex AI's built-in authentication** rather than 
-implementing custom JWT/session authentication.
-
-### How It Works
-
-1. **GCP Service Account**: The backend authenticates to Google Cloud using 
-   application default credentials or a service account key.
-
-2. **No User Authentication**: The current implementation does not have 
-   user-level authentication. All requests are processed under the service 
-   account's permissions.
-
-3. **Active Repository State**: The only "session" concept is `active_repo_state` 
-   in `app/active_repo_state.py`:
-   
-   ```python
-   class ActiveRepoState:
-       _active_repo_id: str = "default"
-       _ingestion_statuses: Dict[str, str] = {}
-   ```
-   
-   This tracks which repository is currently selected, not user identity.
-
-### Security Considerations
-
-- The API is exposed on port 8001 without API key validation
-- All endpoints are publicly accessible once the container is running
-- Chat history is stored per-repository, not per-user
-
-### If You Need User Auth
-
-To add user authentication, you would need to:
-1. Add an auth middleware to FastAPI
-2. Implement token validation (e.g., Firebase Auth, Auth0)
-3. Associate repositories and chat history with user IDs
+**`get_mcp_tools_as_vertex()`** - Fetches tool schemas from MCP server and converts to Vertex AI format:
+```python
+async def get_mcp_tools_as_vertex() -> types.Tool:
+    async with streamablehttp_client(MCP_SERVER_URL) as (read_stream, write_stream, _):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            tools_result = await session.list_tools()
+            # Convert MCP schema → Vertex AI FunctionDeclaration
+            ...
 ```
 
-**Analysis**: The standard RAG response hallucinated a JWT system that doesn't exist. Untango:
-- Searched for "authentication" and found no user auth module
-- Read the actual `active_repo_state.py` to understand the session model
-- Examined FastAPI endpoints for auth middleware (found none)
-- Provided accurate assessment with actionable recommendations
-
-### 5.4 Case Study 3: "What happens when I send a chat message?"
-
-**Query**: "Trace what happens when a user sends a chat message"
-
-**Standard RAG Response**:
-```
-When a user sends a chat message:
-1. The frontend sends a POST request to the chat endpoint
-2. The backend processes the message using RAG to find relevant context
-3. The response is generated and sent back to the user
+**`execute_mcp_tool()`** - Executes tools via MCP protocol:
+```python
+async def execute_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
+    async with ClientSession(read_stream, write_stream) as session:
+        result = await session.call_tool(tool_name, arguments=arguments)
+        # Extract text content from result
+        ...
 ```
 
-**Untango Response** (after 15 tool calls):
-```
-## Complete Chat Message Flow
-
-### 1. Frontend (React)
-
-The chat input is handled in `frontend/src/components/ChatWindow.tsx`:
-
-```typescript
-const handleSubmit = async (e: FormEvent) => {
-  const response = await api.chat(messages);
-  // Streaming handled via useChatStore
-};
+**`get_rag_context_for_query()`** - Injects RAG results into user queries:
+```python
+def get_rag_context_for_query(query: str, repo_id: Optional[str]) -> str:
+    results = perform_hybrid_search(query, n_results=20, repo_id=repo_id)
+    # Format up to 20 chunks as context hints
+    ...
 ```
 
-### 2. API Client
+### 4.3 System Prompt Engineering
 
-`frontend/src/api/client.ts` sends to `/chat-stream`:
+The system prompt is critical for agent behavior. Key sections include:
 
-```typescript
-chatStream: (messages: Message[]) => {
-  return fetch(`${API_URL}/chat-stream`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages })
-  });
-}
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                      SYSTEM PROMPT STRUCTURE                         │
+├──────────────────────────────────────────────────────────────────────┤
+│  1. IDENTITY & ROLE                                                  │
+│     "You are an expert software developer for '{repo_name}'"        │
+│                                                                      │
+│  2. AUTOMATED CONTEXT                                                │
+│     - Current date                                                   │
+│     - README.md content (with outdated warning)                      │
+│     - Repository file tree (BFS, 50 entries max)                     │
+│     - Context report from ContextManager                             │
+│                                                                      │
+│  3. AGGRESSIVE EXPLORATION PRINCIPLE                                 │
+│     - "DO NOT GIVE UP EARLY"                                        │
+│     - Try different search terms                                     │
+│     - Explore adjacent directories                                   │
+│     - Follow import chains                                           │
+│     - Check test files                                               │
+│                                                                      │
+│  4. RULES                                                            │
+│     DO: Read files freely, use RAG search, follow imports           │
+│     DON'T: Say "I don't have access", guess file contents           │
+│                                                                      │
+│  5. SELF-VERIFICATION CHECKLIST                                     │
+│     "Did I follow all import chains?"                               │
+│     "Are there other files I should check?"                         │
+│                                                                      │
+│  6. OUTPUT FORMATTING                                                │
+│     Markdown headers, code blocks, tables                           │
+│                                                                      │
+│  7. THINKING OUT LOUD                                                │
+│     "Always explain reasoning before calling a tool"                │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3. FastAPI Backend
+### 4.4 Supporting Agents
 
-`app/main.py` routes to the streaming endpoint:
+#### Environment Scanner (`app/agents/env_scanner.py`)
+
+Scans the local environment to detect system capabilities:
 
 ```python
-@app.post("/chat-stream")
-async def chat_stream_endpoint(request: ChatRequest):
-    # Trigger smart ingestion sync
-    await current_ingest_manager.sync_repo()
-    
-    # Save user message to history
-    chat_history_manager.add_message(active_repo_id, request.messages[-1])
-    
-    # Stream response
-    return StreamingResponse(
-        chat_with_mcp_agent_stream(request),
-        media_type="application/x-ndjson"
+def scan_environment() -> EnvInfo:
+    return EnvInfo(
+        os_info=get_os_info(),           # "Darwin 23.0.0 (arm64)"
+        python_version=get_python_version(), # "3.11.5"
+        cuda_available=check_cuda_availability()[0],
+        gpu_info=check_cuda_availability()[1],
+        installed_packages=get_installed_packages()  # via uv pip freeze
     )
 ```
 
-### 4. MCP Agent
+#### Repository Mapper (`app/agents/repo_mapper.py`)
 
-`app/agents/mcp_agent.py` orchestrates the response:
-
-1. **Context Preparation**: Loads repository context, README, file tree
-2. **Tool Discovery**: Fetches available tools from MCP server
-3. **Multi-Turn Loop** (up to 15 turns):
-   - Model generates thought + tool call
-   - MCP server executes tool
-   - Result fed back to model
-4. **Streaming**: Tokens yielded as NDJSON events
-
-### 5. Tool Execution
-
-`app/mcp_server.py` handles tool calls:
+Analyzes repository structure to identify:
+- **Entry Points**: Files like `main.py`, `app.py`, `cli.py`
+- **Dependencies**: Extracted from `requirements.txt` and AST imports
+- **Repository Type**: `library` (pip installable) vs `application` (git clone & run)
+- **Directory Tree**: Recursive structure with depth limits
 
 ```python
-@mcp.tool()
-def read_file(filepath: str, max_lines: int = 500) -> str:
-    repo_path = _get_active_repo_path()
-    full_path = os.path.join(repo_path, filepath)
-    # Read and return file content
+def map_repo(repo_path: str, repo_name: str) -> RepoMap:
+    return RepoMap(
+        repo_name=repo_name,
+        root_path=repo_path,
+        structure=build_directory_tree(repo_path),
+        entry_points=find_entry_points(repo_path),
+        dependencies=parse_dependencies(repo_path),
+        last_updated=get_last_updated_date(repo_path),
+        readme_exists=os.path.exists(os.path.join(repo_path, "README.md")),
+        detected_name=detect_repo_name_and_readme(repo_path)[0],
+        repo_type=detect_repo_type(repo_path)  # "library", "application", etc.
+    )
 ```
 
-### 6. Response Assembly
+#### Runbook Generator (`app/agents/runbook_generator.py`)
 
-The streaming response format:
-- `{"type": "token", "content": "..."}`
-- `{"type": "tool_start", "tool": "read_file", "args": {...}}`
-- `{"type": "tool_end", "tool": "read_file", "result": "..."}`
-- `{"type": "usage", "usage": {...}}`
+Generates comprehensive runbooks using LLM synthesis:
+
+```python
+async def generate_runbook_content(
+    repo_map: RepoMap,
+    env_info: EnvInfo,
+    dependency_analysis: List[DependencyStatus],
+    project_id: str,
+    location: str,
+    model: str = "gemini-3-pro-preview"
+) -> str:
+    # 1. RAG search for setup instructions
+    search_queries = [
+        "how to install dependencies",
+        "how to run the application",
+        "setup instructions"
+    ]
+    
+    # 2. Format dependency issues
+    dep_issues = [d for d in dependency_analysis if d.status != "OK"]
+    
+    # 3. Generate runbook via Gemini
+    ...
 ```
 
-**Analysis**: The standard RAG response was generic and unhelpful. Untango:
-- Traced the complete flow from frontend to backend
-- Read actual source code at each layer
-- Provided code snippets from the real implementation
-- Documented the streaming protocol and data format
+### 4.5 Context Manager (`app/context_manager.py`)
 
-### 5.5 Evaluation Summary
+The **Context Manager** orchestrates automated context collection:
 
-| Aspect | Standard RAG | Untango (Agentic) |
-|--------|-------------|-------------------|
-| **Answer Accuracy** | Often outdated or hallucinated | Verified against actual code |
-| **Completeness** | Shallow, single-topic | Deep, follows connections |
-| **Actionability** | Generic instructions | Copy-paste commands |
-| **Code References** | Vague file mentions | Specific line excerpts |
-| **Multi-Component** | Often misses components | Explores all subdirectories |
-| **Tool Calls** | 0 (static context) | 8-15 per query |
+```mermaid
+graph LR
+    A["User Selects<br/>Repository"] --> B["scan_environment()"]
+    B --> C["map_repo()"]
+    C --> D["analyze_dependencies()"]
+    D --> E["ContextReport"]
+    E --> F["Injected into<br/>System Prompt"]
+```
+
+**`ContextReport`** contains:
+- `EnvInfo`: OS, Python version, GPU info, installed packages
+- `RepoMap`: Structure, entry points, dependencies, type
+- `DependencyStatus[]`: Per-dependency version comparison
 
 ---
 
-## 6. Discussion
+## 5. MCP Tool Server
 
-### 6.1 Why Agentic > RAG for Code
+### 5.1 Model Context Protocol (MCP)
 
-Traditional RAG assumes that relevant context can be identified via embedding similarity. This assumption fails for code because:
+MCP is an open protocol that standardizes how AI models interact with external tools and data sources. Untango implements MCP to provide:
+
+**Tool Discovery**: The agent dynamically discovers available tools at runtime by querying the MCP server.
+
+**Type-Safe Execution**: Tools are defined with JSON Schema input specifications, ensuring the LLM provides correctly-typed arguments.
+
+**Clean Separation**: The tool implementations are fully decoupled from the LLM agent logic.
+
+### 5.2 Tool Server Implementation (`app/mcp_server.py`)
+
+```python
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP(
+    name="Untango Code Assistant",
+    json_response=True  # For HTTP transport
+)
+
+@mcp.tool()
+def rag_search(query: str) -> str:
+    """Search the codebase using hybrid vector + keyword search."""
+    results = perform_hybrid_search(query, n_results=5, repo_id=repo_id)
+    ...
+
+@mcp.tool()
+def read_file(filepath: str, max_lines: int = 500) -> str:
+    """Read the content of a file from the repository."""
+    ...
+```
+
+### 5.3 Complete Tool Reference
+
+| Tool | Description | Arguments |
+|------|-------------|-----------|
+| `rag_search(query)` | Hybrid semantic + keyword search across ingested code | `query: str` |
+| `read_file(filepath, max_lines)` | Read source file contents | `filepath: str`, `max_lines: int = 500` |
+| `list_files(directory)` | List directory contents with type indicators | `directory: str = "."` |
+| `find_function_usages(function_name)` | AST-based usage analysis | `function_name: str` |
+| `git_status()` | Current branch and file states | None |
+| `git_diff(filepath)` | Uncommitted changes | `filepath: str = ""` |
+| `git_log(filepath, max_commits)` | Commit history | `filepath: str = ""`, `max_commits: int = 10` |
+| `discover_tests()` | Find pytest test functions | None |
+| `run_tests(test_path, verbose)` | Execute pytest | `test_path: str = ""`, `verbose: bool = True` |
+| `run_linter(filepath)` | Run ruff/flake8/pylint | `filepath: str = ""` |
+| `get_active_repo_path()` | Get repository filesystem path | None |
+
+### 5.4 Tool Implementation Architecture
+
+```
+app/tools/
+├── filesystem.py       # read_file(), list_files()
+│   └── Handles path resolution, max lines, error handling
+│
+├── ast_tools.py        # find_function_usages(), get_function_details(), get_class_hierarchy()
+│   └── Uses Python AST to analyze code structure
+│
+├── git_tools.py        # get_git_status(), get_git_diff(), get_git_log()
+│   └── Wraps git commands with structured output
+│
+├── test_runner.py      # discover_tests(), run_tests(), run_single_test()
+│   └── Pytest integration with timing and failure analysis
+│
+├── code_quality.py     # run_linter(), run_type_checker()
+│   └── Auto-detects ruff, flake8, or pylint
+│
+├── dependencies.py     # get_package_path(), list_package_files()
+│   └── Package inspection utilities
+│
+└── shell_execution.py  # execute_command(), ensure_venv()
+    └── Safe command execution with virtual env
+```
+
+---
+
+## 6. RAG Pipeline
+
+### 6.1 Ingestion Pipeline
+
+The **IngestManager** (`app/ingest_manager.py`) handles repository ingestion:
+
+```mermaid
+graph TB
+    A["Repository Path"] --> B["Scan Files"]
+    B --> C["Filter by Extension<br/>(.py, .md, .ipynb)"]
+    C --> D["Check File Hashes<br/>(Skip unchanged)"]
+    D --> E["Parse Python with AST"]
+    E --> F["Create Semantic Chunks"]
+    F --> G["Generate Embeddings<br/>(all-MiniLM-L6-v2)"]
+    G --> H["Upsert to ChromaDB"]
+```
+
+**Key Features:**
+- **Smart Sync**: Uses file hash caching to skip unchanged files
+- **AST Chunking**: Creates one chunk per function/class/method
+- **Batch Upsert**: ChromaDB handles embeddings and updates atomically
+
+
+### 6.3 Hybrid Search (`app/search.py`)
+
+Combines vector similarity and BM25 keyword search:
+
+```python
+def perform_hybrid_search(
+    query: str,
+    n_results: int,
+    vector_similarity_threshold: Optional[float] = None,
+    bm25_score_threshold: Optional[float] = None,
+    repo_id: Optional[str] = None
+) -> List[Dict]:
+    
+    # 1. Vector Search (ChromaDB + sentence-transformers)
+    vector_results = perform_vector_search(query, n_results * 2, repo_id=repo_id)
+    
+    # 2. BM25 Search (in-memory BM25Okapi)
+    bm25 = BM25Okapi(tokenized_corpus)
+    bm25_scores = bm25.get_scores(tokenize_code(query))
+    
+    # 3. Reciprocal Rank Fusion (RRF)
+    for doc_id in all_doc_ids:
+        vector_rank = get_rank(doc_id, vector_results)
+        bm25_rank = get_rank(doc_id, bm25_results)
+        rrf_score = 1/(k + vector_rank) + 1/(k + bm25_rank)
+        combined_scores[doc_id] = rrf_score
+    
+    return sorted(combined_scores, key=lambda x: x['score'], reverse=True)[:n_results]
+```
+
+**Configuration:**
+- **Embedding Model**: `all-MiniLM-L6-v2` (384 dimensions)
+- **Distance Metric**: Cosine similarity
+- **RRF Constant**: k=60
+
+---
+
+## 8. Qualitative Evaluation
+
+*[This section is a placeholder for qualitative evaluation results to be filled in.]*
+
+<!-- 
+TODO: Add case studies demonstrating qualitative comparison between:
+1. Standard RAG: Single-shot embedding retrieval with direct answer generation
+2. Untango (Agentic): Multi-turn exploration with tool-verified answers
+
+Suggested case studies:
+- "How do I run this project?"
+- "How does authentication work?"
+- "What happens when I send a chat message?"
+
+Include:
+- Standard RAG responses
+- Untango responses with tool call counts
+- Analysis of differences
+- Evaluation summary table
+-->
+
+---
+
+## 9. Discussion
+
+### 9.1 Why Agentic > RAG for Code
+
+Traditional RAG assumes relevant context can be identified via embedding similarity. This fails for code because:
 
 1. **Code requires tracing**: Understanding behavior requires following imports and call chains
-2. **Names are misleading**: A file named `auth.py` might not exist, but auth logic could be in `api/middleware.py`
+2. **Names are misleading**: A file named `auth.py` might not exist, but auth logic could be in `middleware.py`
 3. **Config is scattered**: Running instructions exist in docker-compose.yml, package.json, and .env.example
 4. **Code evolves**: READMEs become outdated faster than actual implementations
 
-The agentic approach addresses these by **reading actual files** rather than relying on embeddings to find "similar" content.
+### 9.2 MCP as an Abstraction Layer
 
-### 6.2 MCP as an Abstraction Layer
-
-The Model Context Protocol provides several benefits:
-
+Benefits:
 1. **Extensibility**: Adding a new tool requires only implementing the MCP interface
 2. **Testing**: Tools can be tested independently of the LLM
-3. **Portability**: The same tools can be used with different LLM providers
-4. **Caching**: Tool schema can be cached, reducing latency
+3. **Portability**: Same tools work with different LLM providers
+4. **Caching**: Tool schemas cached for 60 seconds
 
-### 6.3 Gemini 2.0 Flash Performance
-
-We chose Gemini 2.0 Flash for its:
-
-- **Reliability**: Native function calling reduces parsing errors compared to text-based tool use
-- **Context Length**: 1M+ tokens enables full codebase context when needed
-- **Speed**: Low latency enables interactive exploration
-- **Cost**: ~$0.001-0.01 per complex query
-
-### 6.4 Limitations
+### 9.3 Limitations
 
 1. **Latency**: Multi-turn exploration adds ~5-15 seconds per query
 2. **Token Costs**: Deep exploration uses more tokens than single-shot RAG
 3. **Python Focus**: AST chunking currently supports Python only
 4. **No Execution Sandbox**: Cannot safely execute arbitrary code
 
-### 6.5 Future Work
+### 9.4 Future Work
 
 1. **Selective Dependency Ingestion**: Index only public APIs of dependencies
 2. **Multi-Language Support**: TypeScript, Java, Go AST parsers
@@ -504,12 +599,12 @@ We chose Gemini 2.0 Flash for its:
 
 ---
 
-## 7. Conclusion
+## 10. Conclusion
 
 We presented Untango, a system that demonstrates the superiority of **agentic code exploration** over passive RAG for code assistance. By combining:
 
 - **Model Context Protocol** for standardized tool interfaces
-- **Gemini 2.0 Flash** for reliable function calling
+- **Gemini 3.0 Pro** for reliable function calling
 - **Deep Exploration Workflow** for thorough codebase understanding
 
 Untango achieves significantly higher answer quality and accuracy than traditional retrieval-based systems.
@@ -524,7 +619,7 @@ As software systems grow in complexity, tools like Untango that can actively nav
 
 ---
 
-## 8. References
+## 11. References
 
 [1] GitHub Copilot. (2021). https://github.com/features/copilot
 [2] Cursor. (2023). https://cursor.sh
@@ -541,7 +636,7 @@ As software systems grow in complexity, tools like Untango that can actively nav
 [13] Schick, T., et al. (2023). Toolformer: Language Models Can Teach Themselves to Use Tools. *NeurIPS*.
 [14] Yao, S., et al. (2023). ReAct: Synergizing Reasoning and Acting in Language Models. *ICLR*.
 [15] Model Context Protocol. (2024). https://modelcontextprotocol.io
-[16] Google DeepMind. (2024). Gemini 2.0: A New Era of Multimodal AI.
+[16] Google DeepMind. (2025). Gemini 3.0 Pro.
 [17] Kikas, R., et al. (2017). Structure and Evolution of Package Dependency Networks. *MSR*.
 [18] Decan, A., et al. (2019). An Empirical Comparison of Dependency Network Evolution. *ESE*.
 
@@ -552,7 +647,7 @@ As software systems grow in complexity, tools like Untango that can actively nav
 - **Language**: Python 3.11+, TypeScript/React
 - **Containerization**: Docker & Docker Compose
 - **Database**: ChromaDB (Vector Store)
-- **LLM Provider**: Google Vertex AI (Gemini 2.0 Flash)
+- **LLM Provider**: Google Vertex AI (Gemini 3.0 Pro)
 - **Frontend**: React, Vite, Zustand
 
 ## Appendix B: Reproduction Instructions
@@ -610,6 +705,81 @@ As software systems grow in complexity, tools like Untango that can actively nav
         },
         "required": ["filepath"]
       }
+    },
+    {
+      "name": "list_files",
+      "description": "List files and subdirectories in a directory",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory": {"type": "string", "default": "."}
+        }
+      }
+    },
+    {
+      "name": "find_function_usages",
+      "description": "Find all places where a function is defined and called",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "function_name": {"type": "string"}
+        },
+        "required": ["function_name"]
+      }
+    },
+    {
+      "name": "git_status",
+      "description": "Get the git status of the repository"
+    },
+    {
+      "name": "git_diff",
+      "description": "Get git diff showing changes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filepath": {"type": "string", "default": ""}
+        }
+      }
+    },
+    {
+      "name": "git_log",
+      "description": "Get recent git commit history",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filepath": {"type": "string", "default": ""},
+          "max_commits": {"type": "integer", "default": 10}
+        }
+      }
+    },
+    {
+      "name": "discover_tests",
+      "description": "Discover all pytest tests in the repository"
+    },
+    {
+      "name": "run_tests",
+      "description": "Run pytest tests",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_path": {"type": "string", "default": ""},
+          "verbose": {"type": "boolean", "default": true}
+        }
+      }
+    },
+    {
+      "name": "run_linter",
+      "description": "Run code linter (auto-detects ruff/flake8/pylint)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "filepath": {"type": "string", "default": ""}
+        }
+      }
+    },
+    {
+      "name": "get_active_repo_path",
+      "description": "Get the absolute path to the active repository"
     }
   ]
 }
@@ -630,3 +800,21 @@ As software systems grow in complexity, tools like Untango that can actively nav
   "final_answer": "Run tests with: `pytest tests/ -v`"
 }
 ```
+
+## Appendix E: Complete Backend Module Reference
+
+| Module | Purpose | Key Functions/Classes |
+|--------|---------|----------------------|
+| `main.py` | FastAPI application | `/chat`, `/chat-stream`, `/ingest`, `/query-hybrid` |
+| `mcp_server.py` | MCP tool server | 11 tools via `@mcp.tool()` decorator |
+| `mcp_agent.py` | Primary chat agent | `chat_with_mcp_agent()`, `chat_with_mcp_agent_stream()` |
+| `chat_agent.py` | Legacy agent | `chat_with_agent()` (with tool wrappers) |
+| `repo_mapper.py` | Repo analysis | `map_repo()`, `detect_repo_type()` |
+| `env_scanner.py` | Environment scan | `scan_environment()`, `check_cuda_availability()` |
+| `runbook_generator.py` | Runbook generation | `generate_runbook_content()` |
+| `context_manager.py` | Context orchestration | `ContextManager.get_context_report()` |
+| `ingest_manager.py` | Ingestion pipeline | `IngestManager.sync_repo()` |
+| `search.py` | Hybrid search | `perform_hybrid_search()`, `perform_vector_search()` |
+| `chunker.py` | AST chunking | `chunk_python_code()` |
+| `database.py` | ChromaDB client | `get_collection()`, `get_client()` |
+| `models.py` | Pydantic schemas | `ChatRequest`, `ChatResponse`, `RepoMap`, etc. |
