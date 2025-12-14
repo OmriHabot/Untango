@@ -12,16 +12,40 @@ A production-ready FastAPI backend for Retrieval-Augmented Generation (RAG) with
 
 ## Quick Start
 
-Get the full stack up and running in minutes. You will need **Docker** and **Node.js** (v18+) installed.
+Get the full stack up and running in minutes. You will need **Docker**, **Node.js** (v18+), and a **Google Cloud Project**.
 
-### 1. Start the Backend
+### 1. Setup Google Cloud & Vertex AI
+
+To use the AI features, you need a Google Cloud Service Account.
+
+#### A. Create a Service Account
+1.  Go to [Google Cloud Console > IAM & Admin > Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts).
+2.  Click **+ CREATE SERVICE ACCOUNT**.
+3.  Name it (e.g., `vertex-ai-sa`) and click **CREATE AND CONTINUE**.
+4.  Grant the **Vertex AI User** role (`roles/aiplatform.user`).
+5.  Click **DONE**.
+
+#### B. Download Key & Configure Project
+1.  Click on your new service account -> **KEYS** tab -> **ADD KEY** -> **Create new key** (JSON).
+2.  Save the file as `service-account-key.json` in the root of this project (it is git-ignored).
+3.  **Crucial Step:** Open `service-account-key.json` and copy the value of `"project_id"`.
+4.  Open `docker-compose.yaml` and update the `GOOGLE_CLOUD_PROJECT` environment variable with this ID:
+    ```yaml
+    environment:
+      - GOOGLE_CLOUD_PROJECT=your-copied-project-id  # <--- PASTE HERE
+    ```
+
+#### C. Enable Vertex AI API
+*   Visit [Vertex AI in Cloud Console](https://console.cloud.google.com/vertex-ai) and click **ENABLE** if not already active.
+
+### 2. Start the Backend
 Spin up ChromaDB and the FastAPI backend:
 ```bash
 docker-compose up --build -d
 ```
 > **Note:** The backend runs on `http://localhost:8001` and ChromaDB on `http://localhost:8000`.
 
-### 2. Start the Frontend
+### 3. Start the Frontend
 In a new terminal, launch the React UI:
 ```bash
 cd frontend
@@ -29,7 +53,7 @@ pnpm install && pnpm run dev
 ```
 The UI will open at `http://localhost:5173`.
 
-### 3. Verify System Status
+### 4. Verify System Status
 Visit `http://localhost:8001/health` to confirm the backend is connected to the vector database.
 
 ---
@@ -46,7 +70,7 @@ Untango supports both remote GitHub repositories and local project directories.
 5. Click **Ingest**. The system will clone, parse, and chunk the codebase in the background.
 
 ### Option B: Local Repository (CLI)
-To ingest a project from your local machine (e.g., for privacy or development speed), use the bundled CLI tool. This automatically detects virtual environments and syncs changes.
+To ingest a project from your local machine (e.g., for privacy or development speed), use the bundled CLI tool.
 
 **One-time Upload:**
 ```bash
@@ -55,7 +79,6 @@ python scripts/untango_local.py /path/to/my-project --server http://localhost:80
 ```
 
 **Continuous Sync (Watch Mode):**
-Keep your RAG context up-to-date as you code:
 ```bash
 python scripts/untango_local.py /path/to/my-project --server http://localhost:8001 --watch
 ```
@@ -64,16 +87,14 @@ python scripts/untango_local.py /path/to/my-project --server http://localhost:80
 
 ## Apple Silicon Support (Development)
 
-To leverage **MPS (Metal Performance Shaders)** for hardware-accelerated embeddings on macOS, you must run the backend **natively** (outside Docker) while keeping the database containerized. Docker on macOS cannot access the GPU.
+To leverage **MPS (Metal Performance Shaders)** for hardware-accelerated embeddings on macOS, you must run the backend **natively** (outside Docker) while keeping the database containerized.
 
 ### 1. Start Dependencies (ChromaDB)
-Use the dedicated MPS compose file to run only the database:
 ```bash
 docker-compose -f docker-compose.mps.yaml up -d
 ```
 
 ### 2. Run Backend Natively
-Use the helper script to start the backend with the correct environment variables:
 ```bash
 # Ensure your virtual environment is active
 source .venv/bin/activate
@@ -82,31 +103,22 @@ source .venv/bin/activate
 ./run_backend_mps.sh
 ```
 
-The backend will automatically detect MPS availability and use it for embedding generation.
-
 ## Running with Remote ChromaDB (GCP)
 
-To run the backend connected to a remote ChromaDB instance on Google Cloud Platform (e.g., running on Cloud Run), use the `docker-compose.gcp.yaml` configuration.
+To run the backend connected to a remote ChromaDB instance on Google Cloud Platform:
 
-### 1. Prerequisites
-- A **ChromaDB instance** running on GCP (e.g., deployed to Cloud Run using the `chromadb/chroma` image).
-- **Service Account Key**: Ensure `service-account-key.json` is configured (see GCP Setup section).
-
-### 2. Configuration
+### 1. Configuration
 Set the connection details for your remote ChromaDB instance:
-
 ```bash
-export CHROMA_HOST="your-chroma-service-url.a.run.app" # The URL of your ChromaDB service
-export CHROMA_PORT="443"                                # Usually 443 for Cloud Run (HTTPS)
+export CHROMA_HOST="your-chroma-service-url.a.run.app"
+export CHROMA_PORT="443"
 ```
 
-### 3. Run the Container
-
+### 2. Run the Container
 ```bash
 docker-compose -f docker-compose.gcp.yaml up --build
 ```
-
-This starts the `rag-backend` service with Google IAM authentication enabled for ChromaDB (`CHROMA_AUTH_PROVIDER=google_iam`).
+This starts the `rag-backend` service with Google IAM authentication enabled.
 
 ## API Endpoints
 
@@ -115,7 +127,7 @@ This starts the `rag-backend` service with Google IAM authentication enabled for
 | `/ingest` | POST | Ingest and chunk Python code |
 | `/query` | POST | Vector similarity search |
 | `/query-hybrid` | POST | Hybrid search (vector + BM25) |
-| `/query-db` | POST | **Complete RAG pipeline**: Retrieve + Generate with Vertex AI |
+| `/query-db` | POST | **Complete RAG pipeline**: Retrieve + Generate |
 | `/inference` | POST | Generate AI responses via Vertex AI |
 | `/health` | GET | Service health check |
 | `/collection` | DELETE | Reset the collection |
@@ -135,7 +147,6 @@ app/
 ## Usage Examples
 
 ### Ingest Code
-
 ```bash
 curl -X POST "http://localhost:8001/ingest" \
   -H "Content-Type: application/json" \
@@ -146,22 +157,8 @@ curl -X POST "http://localhost:8001/ingest" \
   }'
 ```
 
-### Search Code
-
-```bash
-curl -X POST "http://localhost:8001/query-hybrid" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "authentication function", "n_results": 5}'
-```
-
 ### RAG Query (Retrieve + Generate)
-
-The `/query-db` endpoint is the **complete RAG pipeline** that:
-1. Retrieves relevant chunks using hybrid search
-2. Filters by confidence threshold (default: 0.2)
-3. Builds a context-aware prompt
-4. Generates an answer using Vertex AI
-
+The `/query-db` endpoint is the **complete RAG pipeline**:
 ```bash
 curl -X POST "http://localhost:8001/query-db" \
   -H "Content-Type: application/json" \
@@ -173,184 +170,32 @@ curl -X POST "http://localhost:8001/query-db" \
   }'
 ```
 
+### Review Response
 Response includes:
 - **answer**: AI-generated response
 - **retrieved_chunks**: All chunks used for context
 - **chunks_used**: Number of chunks above confidence threshold
 - **usage**: Token usage and cost information
 
-### Generate AI Response (Direct)
-
-For direct inference without retrieval:
-
-```bash
-curl -X POST "http://localhost:8001/inference" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "Explain vector databases",
-    "model": "gemini-3-pro-preview"
-  }'
-```
-
-## Google Cloud / Vertex AI Setup
-
-This project uses **Google Cloud Service Account key file** with **Application Default Credentials (ADC)** for authentication. This approach is recommended for workloads running outside of Google Cloud (local machine, other cloud providers, CI/CD pipelines).
-
-### Step-by-Step: Get Your Service Account Key
-
-#### 1. Create a Service Account 🔑
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Select your project (or create one)
-3. Navigate to **IAM & Admin** → **Service Accounts**
-4. Click **+ CREATE SERVICE ACCOUNT**
-5. Enter a name (e.g., `vertex-ai-docker-sa`)
-6. Click **CREATE AND CONTINUE**
-
-#### 2. Grant Necessary Roles
-
-Grant the service account the following roles:
-
-- **Required:** `Vertex AI User` (`roles/aiplatform.user`) - For Vertex AI API calls
-- **Optional:** `Storage Object Admin` (`roles/storage.objectAdmin`) - If accessing Cloud Storage for models/data
-
-1. Click **ADD ANOTHER ROLE** to add multiple roles
-2. Search for and select each role
-3. Click **CONTINUE**, then **DONE**
-
-#### 3. Create and Download the JSON Key
-
-⚠️ **Important:** Treat this file as highly sensitive, like a password.
-
-1. Click on the service account you just created
-2. Go to the **KEYS** tab
-3. Click **ADD KEY** → **Create new key**
-4. Select **JSON** format
-5. Click **CREATE**
-6. The key file will download automatically (e.g., `your-project-xxxxx.json`)
-
-#### 4. Setup the Key File
-
-1. **Move** the downloaded file to your project root:
-   ```bash
-   mv ~/Downloads/your-project-xxxxx.json /path/to/Untango/
-   ```
-
-2. **Rename** it to `service-account-key.json`:
-   ```bash
-   cd /path/to/Untango
-   mv your-project-xxxxx.json service-account-key.json
-   ```
-
-3. **Verify** it's in the correct location:
-   ```bash
-   ls -la service-account-key.json
-   # Should show the file in your project root
-   ```
-
-4. **Update** `docker-compose.yaml` with your actual project ID:
-   ```yaml
-   environment:
-     - GOOGLE_CLOUD_PROJECT=your-actual-project-id
-     - GOOGLE_CLOUD_LOCATION=global  # or your preferred region
-   ```
-
-#### 5. Enable Vertex AI API
-
-1. Go to [Vertex AI in Cloud Console](https://console.cloud.google.com/vertex-ai)
-2. Click **ENABLE** if the API is not already enabled
-3. Wait for activation (usually 1-2 minutes)
-
-### How It Works
-
-The Docker configuration automatically sets up authentication using:
-
-1. **Volume Mount** (read-only for security):
-   ```yaml
-   volumes:
-     - ./service-account-key.json:/app/gcp-key.json:ro
-   ```
-
-2. **Environment Variables** (for Application Default Credentials):
-   ```yaml
-   environment:
-     - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
-     - GOOGLE_CLOUD_PROJECT=your-project-id
-   ```
-
-The Google Cloud client libraries automatically detect and use these credentials via the `GOOGLE_APPLICATION_CREDENTIALS` environment variable.
-
-### Security Best Practices
-
-✅ **DO:**
-- Keep `service-account-key.json` in project root (already in `.gitignore`)
-- Use read-only mount (`:ro`) in Docker
-- Rotate keys periodically in GCP Console
-- Limit service account permissions to only what's needed
-
-❌ **DON'T:**
-- Commit the key file to version control
-- Share the key file publicly
-- Hardcode credentials in code
-- Use overly permissive roles
-
-### Alternative: Workload Identity (For Cloud Deployments)
-
-If deploying to **Google Kubernetes Engine (GKE)** or **Cloud Run**, consider using **Workload Identity** instead. This approach:
-- Eliminates key file management
-- Uses short-lived credentials
-- More secure for production cloud deployments
-- Links Kubernetes/Cloud Run service accounts to GCP service accounts
-
-**Note:** The current setup with key files is ideal for local development and external deployments.
-
-### Configuration
-
-The Docker setup automatically configures credentials via environment variables in `docker-compose.yaml`:
-
-```yaml
-environment:
-  - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-key.json
-  - GOOGLE_CLOUD_PROJECT=your-project-id
-  - GOOGLE_CLOUD_LOCATION=global
-```
-
-### Local Development
-
-Set environment variables before running locally:
-
-```bash
-export GOOGLE_APPLICATION_CREDENTIALS="./service-account-key.json"
-export GOOGLE_CLOUD_PROJECT="your-project-id"
-export GOOGLE_CLOUD_LOCATION="global"
-
-source .venv/bin/activate
-python -m app.main
-```
-
 ## Configuration
 
 ### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CHROMA_HOST` | ChromaDB hostname | `localhost` |
-| `CHROMA_PORT` | ChromaDB port | `8000` |
-| `CHROMA_COLLECTION_NAME` | Collection name | `python_code_chunks` |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP key file | - |
-| `GOOGLE_CLOUD_PROJECT` | GCP project ID | - |
-| `GOOGLE_CLOUD_LOCATION` | GCP region | `global` |
+| Variable | Description |
+|----------|-------------|
+| `CHROMA_HOST` | ChromaDB hostname |
+| `CHROMA_PORT` | ChromaDB port |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP key file |
+| `GOOGLE_CLOUD_PROJECT` | GCP project ID |
+| `GOOGLE_CLOUD_LOCATION` | GCP region (default: global) |
 
 ### Docker Compose
-
-The `docker-compose.yaml` runs two services:
+The `docker-compose.yaml` runs:
 - **chromadb**: Vector database (port 8000)
 - **rag-backend**: FastAPI application (port 8001)
 
 ## Development
 
 ### Install Dependencies
-
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -358,51 +203,15 @@ pip install -r requirements.txt
 ```
 
 ### Run Tests
-
 ```bash
 # Check health
 curl http://localhost:8001/health
-
-# Test inference (requires GCP setup)
-curl -X POST "http://localhost:8001/inference" \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Test"}'
 ```
 
 ## Security
+- **Credentials**: `service-account-key.json` is git-ignored and mounted read-only in Docker.
+- **Secrets**: No hardcoded secrets in the codebase.
 
-- ✅ `service-account-key.json` is in `.gitignore`
-- ✅ Credentials mounted read-only in Docker (`:ro`)
-- ✅ No hardcoded secrets
-- ✅ Type-safe request validation via Pydantic
-
-## Troubleshooting
-
-### ChromaDB Connection Failed
-```bash
-# Check if ChromaDB is running
-docker ps | grep chromadb
-docker-compose logs chromadb
-```
-
-### GCP Credentials Error
-```bash
-# Verify credentials file exists
-ls -la service-account-key.json
-
-# Check environment in container
-docker exec rag-backend env | grep GOOGLE
-```
-
-### Port Already in Use
-```bash
-# Stop existing containers
-docker-compose down
-
-# Check for processes using ports
-lsof -i :8000
-lsof -i :8001
-```
 
 ## License
 
