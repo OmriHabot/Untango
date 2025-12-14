@@ -27,7 +27,7 @@ To use the AI features, you need a Google Cloud Service Account.
 
 #### B. Download Key & Configure Project
 1.  Click on your new service account -> **KEYS** tab -> **ADD KEY** -> **Create new key** (JSON).
-2.  Save the file as `service-account-key.json` in the root of this project (it is git-ignored).
+2.  Save the file as `service-account-key.json` in the root of this project (it is git-ignored). This is the same location as `service-account-key.example.json`, but make sure it's named `service-account-key.json`.
 3.  **Crucial Step:** Open `service-account-key.json` and copy the value of `"project_id"`.
 4.  Open `docker-compose.yaml` and update the `GOOGLE_CLOUD_PROJECT` environment variable with this ID:
     ```yaml
