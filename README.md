@@ -2,7 +2,7 @@
 
 A production-ready FastAPI backend for Retrieval-Augmented Generation (RAG) with intelligent Python code chunking, hybrid search, and Vertex AI integration.
 
-Please visit this link to access the tutorial video:
+## Tutorial Video
 [![](https://utfs.io/f/nGnSqDveMsqxIxEsbOznRMqUaw83rLusOceGiKEpjfFxDlAV)](https://www.youtube.com/watch?v=3cgNrxXgjh0)
 
 ## Features
