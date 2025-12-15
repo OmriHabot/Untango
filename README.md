@@ -2,9 +2,8 @@
 
 A production-ready FastAPI backend for Retrieval-Augmented Generation (RAG) with intelligent Python code chunking, hybrid search, and Vertex AI integration.
 
-[![Untango Tutorial](https://youtu.be/3cgNrxXgjh0?si=w6I5Hvg8Mr8C8vk8)](www.youtube.com)
-
-Please visit this link to access the tutorial video: https://youtu.be/3cgNrxXgjh0?si=w6I5Hvg8Mr8C8vk8
+Please visit this link to access the tutorial video:
+[![](https://utfs.io/f/nGnSqDveMsqxIxEsbOznRMqUaw83rLusOceGiKEpjfFxDlAV)](https://www.youtube.com/watch?v=3cgNrxXgjh0)
 
 ## Features
 
