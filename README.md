@@ -2,9 +2,6 @@
 
 A production-ready FastAPI backend for Retrieval-Augmented Generation (RAG) with intelligent Python code chunking, hybrid search, and Vertex AI integration.
 
-## Tutorial Video
-[![](https://utfs.io/f/nGnSqDveMsqxIxEsbOznRMqUaw83rLusOceGiKEpjfFxDlAV)](https://www.youtube.com/watch?v=3cgNrxXgjh0)
-
 ## Features
 
 - **Intelligent Code Chunking**: AST-based parsing for Python code (functions, classes, methods)
@@ -12,6 +9,9 @@ A production-ready FastAPI backend for Retrieval-Augmented Generation (RAG) with
 - **Code-Aware Tokenization**: Handles camelCase, snake_case, and special characters
 - **Vertex AI Integration**: Generate AI responses using Google's Gemini models
 - **Production Ready**: Type-safe models, proper error handling, comprehensive API docs
+
+## Tutorial Video
+[![](https://utfs.io/f/nGnSqDveMsqxIxEsbOznRMqUaw83rLusOceGiKEpjfFxDlAV)](https://www.youtube.com/watch?v=3cgNrxXgjh0)
 
 ## Quick Start
 
