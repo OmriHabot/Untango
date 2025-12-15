@@ -2,6 +2,8 @@
 
 A production-ready FastAPI backend for Retrieval-Augmented Generation (RAG) with intelligent Python code chunking, hybrid search, and Vertex AI integration.
 
+Please visit this link to access the tutorial video: 
+
 ## Features
 
 - **Intelligent Code Chunking**: AST-based parsing for Python code (functions, classes, methods)
